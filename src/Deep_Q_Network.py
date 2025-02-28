@@ -65,6 +65,7 @@ class DQNAgent:
         self.target_update_interval = target_update_interval
         self.update_step = 0
         self.loss = None
+        self.total_reward_over_episode = []
 
         # 경험 리플레이 버퍼 생성
         self.buffer = GLOBAL_REPLAY_BUFFER
@@ -77,6 +78,24 @@ class DQNAgent:
 
         # 옵티마이저 설정
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=lr)
+        
+    def train_one_episode(self, env):
+        """
+        환경을 주어진 에피소드에서 한 번 실행하고 총 보상을 저장
+        """
+        state = env.reset()
+        done = False
+        total_reward = 0  # 에피소드 동안의 총 보상 저장
+
+        while not done:
+            action = self.select_action(state)
+            next_state, reward, done, _ = env.step(action)
+            self.buffer.push(state, action, reward, next_state, done)
+            state = next_state
+            self.update(batch_size=32)
+            total_reward += reward  # 총 보상 업데이트
+
+        self.total_reward_over_episode.append(total_reward)
 
     def select_action(self, state, epsilon = 0.1):
         """
