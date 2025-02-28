@@ -10,7 +10,7 @@ from Deep_Q_Network import *
 import multiprocessing
 import os
 
-NUM_PROCESSES = 5  # 사용하고 싶은 코어 개수
+NUM_PROCESSES = 11  # 사용하고 싶은 코어 개수
 
 def build_model():
     """
@@ -34,6 +34,27 @@ def run_episode(process_id):
     model = build_model()  # 각 프로세스에서 독립적인 모델 생성
 
     for episode in range(N_EPISODES // NUM_PROCESSES):  # 각 프로세스에서 실행할 에피소드 수 분배
+        # Log simulation events
+        LOG_DAILY_EVENTS .clear()
+
+        # Stores the daily total cost incurred each day
+        LOG_COST .clear()
+
+        # Log daily repots: Inventory level for each item; daily change for each item; Remaining demand (demand - product level)
+        LOG_DAILY_REPORTS .clear()
+        LOG_STATE_DICT .clear()
+
+        # Dictionary to temporarily store the costs incurred over a 24-hour period
+        DAILY_COST = {
+            'Holding cost': 0,
+            'Process cost': 0,
+            'Delivery cost': 0,
+            'Order cost': 0,
+            'Shortage cost': 0
+        }
+
+        GRAPH_LOG = {}
+
         state = env.reset()
         done = False
         while not done:
@@ -45,34 +66,42 @@ def run_episode(process_id):
 
     return model  # 학습된 모델 반환
 
-if __name__ == '__main__':
-    multiprocessing.set_start_method('spawn', force=True)  # Windows에서 멀티프로세싱 실행 설정
+time_list = []
 
-    start_time = time.time()  # 실행 시간 측정 시작
+for x in range(5):
+    if __name__ == '__main__':
+        multiprocessing.set_start_method('spawn', force=True)  # Windows에서 멀티프로세싱 실행 설정
 
-    # 멀티프로세스 실행
-    with multiprocessing.Pool(NUM_PROCESSES) as pool:
-        models = pool.map(run_episode, range(NUM_PROCESSES))
+        start_time = time.time()  # 실행 시간 측정 시작
 
-    # 가장 좋은 모델 선택 (총 보상이 가장 높은 모델)
-    best_model = max(models, key=lambda m: sum(m.total_reward_over_episode) if m.total_reward_over_episode else 0)
-    # 최종 모델 저장
-    if SAVE_MODEL:
-        best_model.save(os.path.join(SAVED_MODEL_PATH, SAVED_MODEL_NAME))
-        print(f"{SAVED_MODEL_NAME} is saved successfully")
+        # 멀티프로세스 실행
+        with multiprocessing.Pool(NUM_PROCESSES) as pool:
+            models = pool.map(run_episode, range(NUM_PROCESSES))
 
-    training_end_time = time.time()  # 학습 종료 시간 측정
+        # 가장 좋은 모델 선택 (총 보상이 가장 높은 모델)
+        best_model = max(models, key=lambda m: sum(m.total_reward_over_episode) if m.total_reward_over_episode else 0)
+        # 최종 모델 저장
+        if SAVE_MODEL:
+            best_model.save(os.path.join(SAVED_MODEL_PATH, SAVED_MODEL_NAME))
+            print(f"{SAVED_MODEL_NAME} is saved successfully")
 
-    # 학습된 모델 평가
-    env = GymInterface()  # 새로운 평가 환경 생성
-    mean_reward, std_reward = gw.evaluate_model(best_model, env, N_EVAL_EPISODES)
-    print(f"Mean reward over {N_EVAL_EPISODES} episodes: {mean_reward:.2f} +/- {std_reward:.2f}")
+        training_end_time = time.time()  # 학습 종료 시간 측정
 
-    # 실행 시간 출력
-    end_time = time.time()
-    print(f"Computation time: {(end_time - start_time)/60:.2f} minutes \n",
-          f"Training time: {(training_end_time - start_time)/60:.2f} minutes \n",
-          f"Test time: {(end_time - training_end_time)/60:.2f} minutes")
+        # 학습된 모델 평가
+        env = GymInterface()  # 새로운 평가 환경 생성
+        mean_reward, std_reward = gw.evaluate_model(best_model, env, N_EVAL_EPISODES)
+        print(f"Mean reward over {N_EVAL_EPISODES} episodes: {mean_reward:.2f} +/- {std_reward:.2f}")
 
-    # 환경 렌더링 (필요하면 실행)
-    env.render()
+        # 실행 시간 출력
+        end_time = time.time()
+        print(f"Computation time: {(end_time - start_time)/60:.2f} minutes \n",
+            f"Training time: {(training_end_time - start_time)/60:.2f} minutes \n",
+            f"Test time: {(end_time - training_end_time)/60:.2f} minutes")
+
+        # 환경 렌더링 (필요하면 실행)
+        env.render()
+        time_list.append(end_time-start_time)
+        start_time = 0
+    
+for times in time_list:
+    print("\n",times)

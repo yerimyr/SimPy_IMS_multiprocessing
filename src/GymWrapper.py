@@ -165,26 +165,32 @@ class GymInterface(gym.Env):
         # Check if the simulation is done
         done = self.simpy_env.now >= SIM_TIME * 24  # 예: SIM_TIME일 이후에 종료
         
-        self.agent.update(batch_size=BATCH_SIZE)
-                
+        self.agent.update(batch_size=BATCH_SIZE)      
         if done == True:
-            self.writer.add_scalar(
-                "reward", self.total_reward, global_step=self.cur_episode)
-            self.writer.add_scalar(
-                "loss", self.agent.loss, global_step=self.cur_episode)
-            # Log each cost ratio at the end of the episode
-            for cost_name, cost_value in self.cost_dict.items():
-                self.writer.add_scalar(
-                    cost_name, cost_value, global_step=self.cur_episode)
-            self.writer.add_scalars(
-                'Cost', self.cost_dict, global_step=self.cur_episode)
+            if reward is not None:
+                self.writer.add_scalar("reward", reward, global_step=self.cur_episode)
+            else:
+                print(f" Warning: reward 값이 None! 기록하지 않음.")
+
+            # loss 값이 None인지 확인 후 기록
+            if self.agent.loss is not None:
+                self.writer.add_scalar("loss", self.agent.loss, global_step=self.cur_episode)
+            else:
+                print(f" Warning: loss 값이 None! 기록하지 않음.")
+
+            # cost_dict 값이 유효한 숫자인 경우만 기록
+            if isinstance(self.cost_dict, dict):
+                valid_cost_dict = {k: v for k, v in self.cost_dict.items() if isinstance(v, (int, float))}
+                if valid_cost_dict:
+                    self.writer.add_scalars('Cost', valid_cost_dict, global_step=self.cur_episode)
+
             print("Episode: ", self.cur_episode,
                   " / Total reward: ", self.total_reward,
                   " / Action: ", action)
             self.total_reward_over_episode.append(self.total_reward)
             self.total_reward = 0
             self.cur_episode += 1
-
+            
         info = {}  # 추가 정보 (필요에 따라 사용)
         return next_state, reward, done, info
 

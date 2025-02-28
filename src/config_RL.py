@@ -33,7 +33,7 @@ for key in P:
 # maximum production
 
 # Episode
-N_EPISODES = 3000  # 3000
+N_EPISODES = 1000  # 3000
 
 
 def DEFINE_FOLDER(folder_name):
@@ -47,8 +47,7 @@ def DEFINE_FOLDER(folder_name):
 
 
 def save_path(path):
-    if os.path.exists(path):
-        shutil.rmtree(path)
+
     # Create a new folder
     os.makedirs(path, exist_ok=True)
     return path
