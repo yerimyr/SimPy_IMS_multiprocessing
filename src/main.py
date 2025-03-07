@@ -1,107 +1,80 @@
 import GymWrapper as gw
 import time
-import HyperparamTuning as ht
+import HyperparamTuning as ht  # Module for hyperparameter tuning
 from GymWrapper import GymInterface
 from config_SimPy import *
 from config_RL import *
+from stable_baselines3 import DQN, DDPG, PPO
 from log_SimPy import *
 from log_RL import *
+from visualization_SimPy import *
 from Deep_Q_Network import *
-import multiprocessing
-import os
-
-NUM_PROCESSES = 11  # 사용하고 싶은 코어 개수
 
 def build_model():
-    """
-    새로운 DQN 모델을 생성
-    """
-    env = GymInterface()  # 환경을 초기화
-    model = DQNAgent(
-        state_dim=env.observation_space.shape[0], 
-        action_dim=env.action_space.n, 
-        buffer_size=BUFFER_SIZE, 
-        lr=LEARNING_RATE, 
-        gamma=GAMMA
-    )
+    model = DQNAgent(state_dim=env.observation_space.shape[0], 
+                         action_dim=env.action_space.n, 
+                         buffer_size=BUFFER_SIZE, lr=LEARNING_RATE, gamma=GAMMA, device=DEVICE)
     return model
 
-def run_episode(process_id):
-    """
-    멀티프로세스로 실행할 각 에피소드 학습 함수
-    """
-    env = GymInterface()  # 각 프로세스에서 독립적인 환경 생성
-    model = build_model()  # 각 프로세스에서 독립적인 모델 생성
+# Start timing the computation
+start_time = time.time()
 
-    for episode in range(N_EPISODES // NUM_PROCESSES):  # 각 프로세스에서 실행할 에피소드 수 분배
-        # Log simulation events
-        LOG_DAILY_EVENTS .clear()
+# Create environment
+env = GymInterface()
 
-        # Stores the daily total cost incurred each day
-        LOG_COST .clear()
-
-        # Log daily repots: Inventory level for each item; daily change for each item; Remaining demand (demand - product level)
-        LOG_DAILY_REPORTS .clear()
-        LOG_STATE_DICT .clear()
-
-        # Dictionary to temporarily store the costs incurred over a 24-hour period
-        DAILY_COST = {
-            'Holding cost': 0,
-            'Process cost': 0,
-            'Delivery cost': 0,
-            'Order cost': 0,
-            'Shortage cost': 0
-        }
-
-        GRAPH_LOG = {}
-
-        state = env.reset()
-        done = False
-        while not done:
-            action = model.select_action(state, epsilon=max(0.1, 1.0 - episode / 500))
-            next_state, reward, done, _ = env.step(action)
-            model.buffer.push(state, action, reward, next_state, done)
-            state = next_state
-            model.update(batch_size=32)
-
-    return model  # 학습된 모델 반환
-
-time_list = []
-
-for x in range(5):
-    if __name__ == '__main__':
-        multiprocessing.set_start_method('spawn', force=True)  # Windows에서 멀티프로세싱 실행 설정
-
-        start_time = time.time()  # 실행 시간 측정 시작
-
-        # 멀티프로세스 실행
-        with multiprocessing.Pool(NUM_PROCESSES) as pool:
-            models = pool.map(run_episode, range(NUM_PROCESSES))
-
-        # 가장 좋은 모델 선택 (총 보상이 가장 높은 모델)
-        best_model = max(models, key=lambda m: sum(m.total_reward_over_episode) if m.total_reward_over_episode else 0)
-        # 최종 모델 저장
+# Run hyperparameter optimization if enabled
+if OPTIMIZE_HYPERPARAMETERS:
+    ht.run_optuna()
+    # Calculate computation time and print it
+    end_time = time.time()
+    print(f"Computation time: {(end_time - start_time)/60:.2f} minutes ")
+else:
+    # Build the model
+    if LOAD_MODEL:
+        if RL_ALGORITHM == "DQN":
+            model = DQN.load(os.path.join(
+                SAVED_MODEL_PATH, LOAD_MODEL_NAME), env=env)
+        print(f"{LOAD_MODEL_NAME} is loaded successfully")
+    else:
+        model = build_model()
+        # Train the model
+        for episode in range(N_EPISODES):
+            state = env.reset()
+            done = False
+            while not done:
+                action = model.select_action(state, epsilon = max(0.1, 1.0 - episode/500))
+                next_state, reward, done, _ = env.step(action)                
+                model.buffer.push(state, action, reward, next_state, done)
+                state = next_state
+                model.update(batch_size=32)
         if SAVE_MODEL:
-            best_model.save(os.path.join(SAVED_MODEL_PATH, SAVED_MODEL_NAME))
+            model.save(os.path.join(SAVED_MODEL_PATH, SAVED_MODEL_NAME))
             print(f"{SAVED_MODEL_NAME} is saved successfully")
 
-        training_end_time = time.time()  # 학습 종료 시간 측정
+        if STATE_TRAIN_EXPORT:
+            gw.export_state('TRAIN')
+    training_end_time = time.time()
 
-        # 학습된 모델 평가
-        env = GymInterface()  # 새로운 평가 환경 생성
-        mean_reward, std_reward = gw.evaluate_model(best_model, env, N_EVAL_EPISODES)
-        print(f"Mean reward over {N_EVAL_EPISODES} episodes: {mean_reward:.2f} +/- {std_reward:.2f}")
+    # Evaluate the trained model
+    mean_reward, std_reward = gw.evaluate_model(model, env, N_EVAL_EPISODES)
+    print(
+        f"Mean reward over {N_EVAL_EPISODES} episodes: {mean_reward:.2f} +/- {std_reward:.2f}")
 
-        # 실행 시간 출력
-        end_time = time.time()
-        print(f"Computation time: {(end_time - start_time)/60:.2f} minutes \n",
-            f"Training time: {(training_end_time - start_time)/60:.2f} minutes \n",
-            f"Test time: {(end_time - training_end_time)/60:.2f} minutes")
+    if PRINT_GRAPH_RECORD:
+        viz_sq()
 
-        # 환경 렌더링 (필요하면 실행)
-        env.render()
-        time_list.append(end_time-start_time)
-        start_time = 0
-    
-for times in time_list:
-    print("\n",times)
+    if PRINT_LOG_REPORTS:
+        print("\nLIST_LOG_DAILY_REPORTS ================")
+        for report in LIST_LOG_DAILY_REPORTS:
+            print(report)
+        print("\nLIST_LOG_STATE_DICT ================")
+        for record in LIST_LOG_STATE_DICT:
+            print(record)
+
+    # Calculate computation time and print it
+    end_time = time.time()
+    print(f"\nComputation time (s): {(end_time - start_time):.2f} seconds")
+    print(f"Computation time (m): {(end_time - start_time)/60:.2f} minutes")
+
+# Optionally render the environment
+env.render()

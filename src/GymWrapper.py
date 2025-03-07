@@ -12,13 +12,22 @@ from torch.utils.tensorboard import SummaryWriter
 from Deep_Q_Network import *
 
 class GymInterface(gym.Env):
+    """
+    A Gym environment interface for simulation using SimPy and Deep Q-Network.
+    
+    Attributes:
+        writer: Tensorboard writer for logging.
+        scenario: Scenario settings for demand and lead time.
+        action_space: Action space for the environment.
+        observation_space: Observation space for the environment.
+        agent (DQNAgent): Reinforcement learning agent.
+        buffer: Replay buffer.
+    """
     def __init__(self):
-        self.outer_end = False
         super(GymInterface, self).__init__()
         self.writer = SummaryWriter(log_dir=TENSORFLOW_LOGS)
         if EXPERIMENT:
             self.scenario = {}
-
         else:
             self.scenario = {"DEMAND": DEMAND_SCENARIO,
                              "LEADTIME": LEADTIME_SCENARIO}
@@ -26,14 +35,8 @@ class GymInterface(gym.Env):
         self.shortages = 0
         self.total_reward_over_episode = []
         self.total_reward = 0
-        self.cur_episode = 1  # Current episode
-        self.cur_outer_loop = 1  # Current outer loop
-        self.cur_inner_loop = 1  # Current inner loop
-        self.scenario_batch_size = 99999  # Initialize the scenario batch size
+        self.cur_episode = 1
 
-        # For functions that only work when testing the model
-        self.model_test = False
-        # Record the cumulative value of each cost
         self.cost_dict = {
             'Holding cost': 0,
             'Process cost': 0,
@@ -43,9 +46,7 @@ class GymInterface(gym.Env):
         }
         os = []
 
-        # Action space, observation space
         if RL_ALGORITHM == "DQN":
-            # Define action space
             actionSpace = []
             for i in range(len(I)):
                 if I[i]["TYPE"] == "Material":
@@ -74,13 +75,17 @@ class GymInterface(gym.Env):
             lr=LEARNING_RATE, 
             gamma=GAMMA
             )
-            
-            # replay buffer를 하나로 통일
             self.buffer = GLOBAL_REPLAY_BUFFER
 
 
     def reset(self):
-        # Initialize the total reward for the episode
+        """
+        Reset the environment for a new episode.
+          
+        Returns:
+            state_real: The initial state of the environment.
+        """
+
         self.cost_dict = {
             'Holding cost': 0,
             'Process cost': 0,
@@ -88,9 +93,10 @@ class GymInterface(gym.Env):
             'Order cost': 0,
             'Shortage cost': 0
         }
+        
         # Initialize the simulation environment
         self.simpy_env, self.inventoryList, self.procurementList, self.productionList, self.sales, self.customer, self.providerList, self.daily_events = env.create_env(
-            I, P, LOG_DAILY_EVENTS)
+            I, P, LIST_DAILY_EVENTS)
         env.simpy_event_processes(self.simpy_env, self.inventoryList, self.procurementList,
                                   self.productionList, self.sales, self.customer, self.providerList, self.daily_events, I, self.scenario)
         env.update_daily_report(self.inventoryList)
@@ -100,49 +106,61 @@ class GymInterface(gym.Env):
         return state_real
 
     def step(self, action):
+        """
+        Execute one time step within the environment.
         
-        # 현재 상태를 CPU에서 얻기
+        Args:
+            action: The action chosen by the agent.
+            
+        Returns:
+            next_state: The next state after the action.
+            reward: The reward received.
+            done: Whether the episode is finished.
+            info: Additional information (if any).
+        """
+        # Get current state from CPU
         state_real = self.get_current_state()
 
-        # GPU로 데이터를 보내고, 행동 선택
-        state_tensor = torch.tensor(state_real, dtype=torch.float32).unsqueeze(0)
+        # Send state to GPU and select action using the agent
+        state_tensor = torch.tensor(state_real, dtype=torch.float32).unsqueeze(0).to(DEVICE)
         action = self.agent.select_action(state_tensor)
-
-
-        # Update the action of the agent
+        
         if RL_ALGORITHM == "DQN":
             for _ in range(len(I)):
                 if I[_]["TYPE"] == "Material":
                     I[_]["LOT_SIZE_ORDER"] = action  
                     break
-
-        # Capture the current state of the environment
-        # current_state = env.cap_current_state(self.inventoryList)
+                
         # Run the simulation for 24 hours (until the next day)
         # Action append
         STATE_ACTION_REPORT_REAL[-1].append(action)
         self.simpy_env.run(until=self.simpy_env.now + 24)
         env.update_daily_report(self.inventoryList)
+        
         # Capture the next state of the environment
         state_real = self.get_current_state()
+        
         # Set the next state
         next_state = state_real
+        
         # Calculate the total cost of the day
         env.Cost.update_cost_log(self.inventoryList)
-        if PRINT_SIM_EVENTS:
-            cost = dict(DAILY_COST)
+        
+        if PRINT_DAILY_EVENTS:
+            cost = dict(DICT_DAILY_COST)
+            
         # Cost Dict update
-        for key in DAILY_COST.keys():
-            self.cost_dict[key] += DAILY_COST[key]
+        for key in DICT_DAILY_COST.keys():
+            self.cost_dict[key] += DICT_DAILY_COST[key]
 
         env.Cost.clear_cost()
 
-        reward = -LOG_COST[-1]
+        reward = -LIST_LOG_COST[-1]
         self.total_reward += reward
         self.shortages += self.sales.num_shortages
         self.sales.num_shortages = 0
 
-        if PRINT_SIM_EVENTS:
+        if PRINT_DAILY_EVENTS:
             # Print the simulation log every 24 hours (1 day)
             print(f"\nDay {(self.simpy_env.now+1) // 24}:")
             if RL_ALGORITHM == "DQN":
@@ -150,6 +168,7 @@ class GymInterface(gym.Env):
                     if I[_]["TYPE"] == "Material":  
                         print(f"[Order Quantity for {I[_]['NAME']}] ", action)  
                         break  
+                    
             # SimPy simulation print
             for log in self.daily_events:
                 print(log)
@@ -165,49 +184,50 @@ class GymInterface(gym.Env):
         # Check if the simulation is done
         done = self.simpy_env.now >= SIM_TIME * 24  # 예: SIM_TIME일 이후에 종료
         
-        self.agent.update(batch_size=BATCH_SIZE)      
+        self.agent.update(batch_size=BATCH_SIZE)
+                
         if done == True:
-            if reward is not None:
-                self.writer.add_scalar("reward", reward, global_step=self.cur_episode)
-            else:
-                print(f" Warning: reward 값이 None! 기록하지 않음.")
-
-            # loss 값이 None인지 확인 후 기록
-            if self.agent.loss is not None:
-                self.writer.add_scalar("loss", self.agent.loss, global_step=self.cur_episode)
-            else:
-                print(f" Warning: loss 값이 None! 기록하지 않음.")
-
-            # cost_dict 값이 유효한 숫자인 경우만 기록
-            if isinstance(self.cost_dict, dict):
-                valid_cost_dict = {k: v for k, v in self.cost_dict.items() if isinstance(v, (int, float))}
-                if valid_cost_dict:
-                    self.writer.add_scalars('Cost', valid_cost_dict, global_step=self.cur_episode)
-
+            self.writer.add_scalar(
+                "reward", self.total_reward, global_step=self.cur_episode)
+            self.writer.add_scalar(
+                "loss", self.agent.loss, global_step=self.cur_episode)
+            # Log each cost ratio at the end of the episode
+            for cost_name, cost_value in self.cost_dict.items():
+                self.writer.add_scalar(
+                    cost_name, cost_value, global_step=self.cur_episode)
+            self.writer.add_scalars(
+                'Cost', self.cost_dict, global_step=self.cur_episode)
             print("Episode: ", self.cur_episode,
                   " / Total reward: ", self.total_reward,
                   " / Action: ", action)
             self.total_reward_over_episode.append(self.total_reward)
             self.total_reward = 0
             self.cur_episode += 1
-            
+
         info = {}  # 추가 정보 (필요에 따라 사용)
         return next_state, reward, done, info
 
     def get_current_state(self):
-        # Make State for RL
+        """
+        Generate the current state representation for the agent.
+     
+        Returns:
+            state: The current state, including on-hand inventory levels, intransit inventory levels and remaining demand.
+        """
+ 
         state = []
-        # Update STATE_ACTION_REPORT_REAL
+
         for id in range(len(I)):
-            # ID means Item_ID, 7 means to the length of the report for one item
             # append On_Hand_inventory
             state.append(
-                LOG_STATE_DICT[-1][f"On_Hand_{I[id]['NAME']}"]+INVEN_LEVEL_MAX)
+                LIST_LOG_STATE_DICT[-1][f"On_Hand_{I[id]['NAME']}"]+INVEN_LEVEL_MAX)
+            
+            # append In_Transit_inventory
             if INTRANSIT == 1:
                 if I[id]["TYPE"] == "Material":
                     # append Intransition inventory
                     state.append(
-                        LOG_STATE_DICT[-1][f"In_Transit_{I[id]['NAME']}"])
+                        LIST_LOG_STATE_DICT[-1][f"In_Transit_{I[id]['NAME']}"])
 
         # Append remaining demand
         state.append(I[0]["DEMAND_QUANTITY"] -
@@ -223,13 +243,22 @@ class GymInterface(gym.Env):
         # 필요한 경우, 여기서 리소스를 정리
         pass
 
-# Function to evaluate the trained model
 def evaluate_model(model, env, num_episodes):
-    all_rewards = []  # List to store total rewards for each episode
-    # XAI = []  # List for storing data for explainable AI purposes
+    """
+    Evaluate the trained model over a number of episodes.
+    
+    Args:
+        model: The trained RL model.
+        env (GymInterface): The Gym environment.
+        num_episodes: Number of episodes for evaluation.
+        
+    Returns:
+        mean_reward: Mean reward over episodes.
+        std_reward: Standard deviation of rewards.
+    """
+    all_rewards = []  
     STATE_ACTION_REPORT_REAL.clear()
     ORDER_HISTORY = []
-    # For validation and visualization
     Mat_Order = {}
     for mat in range(MAT_COUNT):
         Mat_Order[f"mat {mat}"] = []
@@ -239,7 +268,7 @@ def evaluate_model(model, env, num_episodes):
     for i in range(num_episodes):
         ORDER_HISTORY.clear()
         episode_inventory = [[] for _ in range(len(I))]
-        LOG_DAILY_REPORTS.clear()  # Clear daily reports at the start of each episode
+        LIST_LOG_DAILY_REPORTS.clear()  # Clear daily reports at the start of each episode
         obs = env.reset()  # Reset the environment to get initial observation
         episode_reward = 0  # Initialize reward for the episode
         env.model_test = True
@@ -280,7 +309,10 @@ def evaluate_model(model, env, num_episodes):
 
 
 def cal_cost_avg():
-    # Temp_Dict
+    """
+    Calculate and visualize the average cost over evaluation episodes.
+    
+    """
     cost_avg = {
         'Holding cost': 0,
         'Process cost': 0,
@@ -288,7 +320,7 @@ def cal_cost_avg():
         'Order cost': 0,
         'Shortage cost': 0
     }
-    # Temp_List
+
     total_avg = []
 
     # Cal_cost_AVG
@@ -298,6 +330,7 @@ def cal_cost_avg():
         total_avg.append(sum(COST_RATIO_HISTORY[x].values()))
     for key in cost_avg.keys():
         cost_avg[key] = cost_avg[key]/N_EVAL_EPISODES
+        
     # Visualize
     if VIZ_COST_PIE:
         plt.figure(figsize=(10, 5))
@@ -317,6 +350,16 @@ def cal_cost_avg():
 
 
 def Visualize_invens(inventory, demand_qty, Mat_Order, all_rewards):
+    """
+    Visualize inventory, demand, and order history.
+    
+    Args:
+        inventory: Inventory data over episodes.
+        demand_qty: Demand quantities over episodes.
+        Mat_Order: Order history for materials.
+        all_rewards: Total rewards for episodes.
+
+    """
     best_reward = -99999999999999
     best_index = 0
     for x in range(N_EVAL_EPISODES):
@@ -374,6 +417,10 @@ def Visualize_invens(inventory, demand_qty, Mat_Order, all_rewards):
 
 
 def export_state(Record_Type):
+    """
+    Export the state-action report as a CSV file.
+    
+    """
     state_real = pd.DataFrame(STATE_ACTION_REPORT_REAL)
 
     if Record_Type == 'TEST':
