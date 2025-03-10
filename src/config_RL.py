@@ -36,7 +36,7 @@ for key in P:
 # maximum production
 
 # Episode
-N_EPISODES = 3000  # 3000
+N_EPISODES = 100  # 3000
 
 
 def DEFINE_FOLDER(folder_name):
@@ -66,7 +66,7 @@ USE_CORRECTION = True
 EXPERIMENT = False
 
 # Evaluation
-N_EVAL_EPISODES = 100  # 100
+N_EVAL_EPISODES = 50  # 100
 
 # Export files
 DAILY_REPORT_EXPORT = False

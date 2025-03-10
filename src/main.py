@@ -7,7 +7,7 @@ from Deep_Q_Network import DQNAgent
 from config_RL import *
 
 # Number of cores to use for multiprocessing
-N_MULTIPROCESS = 1
+N_MULTIPROCESS = 3
 
 def build_model(env):
     """
@@ -102,7 +102,7 @@ if __name__ == '__main__':
         # For each episode, run simulations in parallel across multiple processes,
         # collect batches of transitions from each worker, store them in the global replay buffer,
         # and update the global model using these transitions.
-        for episode in range(N_EPISODES):
+        for episode in range(N_EPISODES//N_MULTIPROCESS):
             # Retrieve the current global model parameters to share with all workers.
             model_state_dict = model.q_network.state_dict()
 
