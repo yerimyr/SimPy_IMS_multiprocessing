@@ -45,22 +45,42 @@ class ReplayBuffer:
 
     def push(self, state, action, reward, next_state, done):
         """
-        Store a new experience in the replay buffer.
-        
+        Push a new experience (transition) into the replay buffer.
+
         Args:
-            state: The current state.
-            action: The action taken.
-            reward: The reward received.
-            next_state: The next state after taking the action.
-            done: A boolean flag indicating if the episode ended.
+            state: The current state of the environment.
+            action: The action taken by the agent.
+            reward: The reward received after taking the action.
+            next_state: The state of the environment after the action.
+            done: A flag indicating whether the episode has terminated.
         """
-        state = torch.tensor(state, dtype=torch.float32).to('cpu')
-        action = torch.tensor(action, dtype=torch.long).to('cpu')
-        reward = torch.tensor(reward, dtype=torch.float32).to('cpu')
-        next_state = torch.tensor(next_state, dtype=torch.float32).to('cpu')
-        done = torch.tensor(done, dtype=torch.float32).to('cpu')
-        
+        if isinstance(state, torch.Tensor):
+            state = state.clone().detach().to('cpu')
+        else:
+            state = torch.tensor(state, dtype=torch.float32).to('cpu')
+            
+        if isinstance(action, torch.Tensor):
+            action = action.clone().detach().to('cpu')
+        else:
+            action = torch.tensor(action, dtype=torch.long).to('cpu')
+            
+        if isinstance(reward, torch.Tensor):
+            reward = reward.clone().detach().to('cpu')
+        else:
+            reward = torch.tensor(reward, dtype=torch.float32).to('cpu')
+            
+        if isinstance(next_state, torch.Tensor):
+            next_state = next_state.clone().detach().to('cpu')
+        else:
+            next_state = torch.tensor(next_state, dtype=torch.float32).to('cpu')
+            
+        if isinstance(done, torch.Tensor):
+            done = done.clone().detach().to('cpu')
+        else:
+            done = torch.tensor(done, dtype=torch.float32).to('cpu')
+            
         self.buffer.append((state, action, reward, next_state, done))
+
           
     def sample(self, batch_size):
         """
@@ -125,7 +145,7 @@ class DQNAgent:
 
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=lr)
 
-    def select_action(self, state, epsilon=0.1):
+    def select_action(self, state, epsilon = max(0.1, 1.0 - N_EPISODES/500)):
         """
         Select an action using an epsilon-greedy policy.
         

@@ -278,7 +278,7 @@ def evaluate_model(model, env, num_episodes):
             for x in range(len(env.inventoryList)):
                 episode_inventory[x].append(
                     env.inventoryList[x].on_hand_inventory)
-            action = model.select_action(obs, epsilon=0)
+            action = model.select_action(obs, epsilon = max(0.1, 1.0 - N_EPISODES/500))
             obs, reward, done, _ = env.step(action)
             episode_reward += reward  # Accumulate rewards
             ORDER_HISTORY.append(action)  # Log order history
