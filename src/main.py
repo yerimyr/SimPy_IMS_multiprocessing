@@ -1,6 +1,7 @@
 import os
 import time
 import multiprocessing
+import math
 import torch
 from GymWrapper import GymInterface
 from Deep_Q_Network import DQNAgent
@@ -73,9 +74,11 @@ if __name__ == '__main__':
     multiprocessing.set_start_method('spawn')
     
     computation_times = []
+    num_groups = math.ceil(N_EPISODES/N_MULTIPROCESS)
 
     for run in range(5):
         print(f"=============== experiment {run+1} ===============")
+        episode_counter = 0
         # Create a GymInterface environment in the main process to access observation and action spaces.
         env = GymInterface()
 
@@ -102,7 +105,10 @@ if __name__ == '__main__':
         # For each episode, run simulations in parallel across multiple processes,
         # collect batches of transitions from each worker, store them in the global replay buffer,
         # and update the global model using these transitions.
-        for episode in range(N_EPISODES//N_MULTIPROCESS):
+        for episode in range(num_groups):
+            remaining_episodes = N_EPISODES - episode_counter
+            current_core = min(N_MULTIPROCESS, remaining_episodes)
+            
             # Retrieve the current global model parameters to share with all workers.
             model_state_dict = model.q_network.state_dict()
 
@@ -110,7 +116,7 @@ if __name__ == '__main__':
             with multiprocessing.Pool(N_MULTIPROCESS) as pool:
                 # starmap함수를 통해 각 코어에 대해 simulation_worker함수를 병렬로 실행, 각 코어에 코어 id와 model의 파라미터가 전달됨.
                 # 결과적으로 각 코어는 자신의 시뮬레이션 에피소드를 실행한 후, 자체 replay buffer에서 BATCH_SIZE만큼 샘플링한 배치를 numpy 배열 형태로 반환하고 results 리스트에 저장함.
-                results = pool.starmap(simulation_worker, [(i, model_state_dict) for i in range(N_MULTIPROCESS)]) 
+                results = pool.starmap(simulation_worker, [(i, model_state_dict) for i in range(current_core)]) 
             
             # Process each worker's returned sample batch.
             for sample in results:
@@ -127,6 +133,7 @@ if __name__ == '__main__':
                     # Update the global model using the global replay buffer with a batch size of BATCH_SIZE.
                     model.update(batch_size=BATCH_SIZE)
             
+            episode_counter += current_core
             print(f"Episode {episode+1}: Multiprocess simulation complete and model updated {N_MULTIPROCESS} times.")
         
         if SAVE_MODEL:
