@@ -8,7 +8,7 @@ from Deep_Q_Network import DQNAgent
 from config_RL import *
 
 # Number of cores to use for multiprocessing
-N_MULTIPROCESS = 3
+N_MULTIPROCESS = 14
 
 def build_model(env):
     """
@@ -28,9 +28,10 @@ def build_model(env):
         gamma=GAMMA,
         device=DEVICE
     )
+    
     return model
 
-def simulation_worker(core_id, model_state_dict):
+def simulation_worker(core_id, model_state_dict, manager):
     """
     Worker function executed in each process.
 
@@ -51,37 +52,45 @@ def simulation_worker(core_id, model_state_dict):
     """
     # Create a GymInterface environment for this worker process
     env_instance = GymInterface()
+    
     # Load the global model parameters into the worker's local agent's Q-network
     env_instance.agent.q_network.load_state_dict(model_state_dict)
-    
+    env_instance.agent.buffer = manager[f"process_{core_id}"]
     state = env_instance.reset()
     done = False
+    
     while not done:
         action = env_instance.agent.select_action(state, epsilon = max(0.1, 1.0 - N_EPISODES/500))
         next_state, reward, done, _ = env_instance.step(action)
         env_instance.agent.buffer.push(state, action, reward, next_state, done)
         state = next_state
-
+    
     if len(env_instance.agent.buffer) >= BATCH_SIZE:
         sample = env_instance.agent.buffer.sample(BATCH_SIZE)
         sample = tuple(x.cpu().numpy() for x in sample)
     else:
+        print("Not enough samples")
         sample = None
-
+        
+    manager[f"process_{core_id}"] = env_instance.agent.buffer
+    
     return sample
 
 if __name__ == '__main__':
     multiprocessing.set_start_method('spawn')
     
-    computation_times = []
-    num_groups = math.ceil(N_EPISODES/N_MULTIPROCESS)
-
     for run in range(5):
         print(f"=============== experiment {run+1} ===============")
         episode_counter = 0
         # Create a GymInterface environment in the main process to access observation and action spaces.
         env = GymInterface()
-
+        
+        manager = multiprocessing.Manager().dict()
+        
+        for id in range(N_MULTIPROCESS):
+            manager[f"process_{id}"] = env.agent.buffer
+        computation_times = []
+        num_groups = math.ceil(N_EPISODES/N_MULTIPROCESS)
         # Create or load the global model.
         if LOAD_MODEL:
             model = DQNAgent(
@@ -116,20 +125,13 @@ if __name__ == '__main__':
             with multiprocessing.Pool(N_MULTIPROCESS) as pool:
                 # starmap함수를 통해 각 코어에 대해 simulation_worker함수를 병렬로 실행, 각 코어에 코어 id와 model의 파라미터가 전달됨.
                 # 결과적으로 각 코어는 자신의 시뮬레이션 에피소드를 실행한 후, 자체 replay buffer에서 BATCH_SIZE만큼 샘플링한 배치를 numpy 배열 형태로 반환하고 results 리스트에 저장함.
-                results = pool.starmap(simulation_worker, [(i, model_state_dict) for i in range(current_core)]) 
+                results = pool.starmap(simulation_worker, [(i, model_state_dict, manager) for i in range(current_core)]) 
             
             # Process each worker's returned sample batch.
             for sample in results:
                 if sample is not None:
-                    batch_size_in_sample = sample[0].shape[0]
-                    # For each transition in the batch, push it into the global replay buffer.
-                    for i in range(batch_size_in_sample):  # 샘플 배치 내의 각 transition을 하나씩 순회함.
-                        state_arr = sample[0][i]
-                        action_val = int(sample[1][i][0])  # 단일 원소
-                        reward_val = float(sample[2][i][0])  # 단일 원소
-                        next_state_arr = sample[3][i]
-                        done_val = bool(sample[4][i][0])  # 단일 원소
-                        model.buffer.push(state_arr, action_val, reward_val, next_state_arr, done_val)
+                    num_batch_size_in_sample = sample[0].shape[0]
+                    model.buffer=sample
                     # Update the global model using the global replay buffer with a batch size of BATCH_SIZE.
                     model.update(batch_size=BATCH_SIZE)
             
