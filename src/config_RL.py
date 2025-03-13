@@ -6,9 +6,7 @@ import torch
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # RL algorithms
-RL_ALGORITHM = "DQN"  # "DP", "DQN", "DDPG", "PPO", "SAC"
-# BEST_PARAMS = {'learning_rate': 0.000171573369797847,
-#                'gamma': 0.9380991034336233, 'batch_size': 16}
+RL_ALGORITHM = "PPO"  # "DQN", "PPO"
 
 ACTION_SPACE = [0, 1, 2, 3, 4, 5]
 
@@ -36,7 +34,7 @@ for key in P:
 # maximum production
 
 # Episode
-N_EPISODES = 100  # 3000
+N_EPISODES = 10000  # 3000
 
 
 def DEFINE_FOLDER(folder_name):
@@ -66,7 +64,7 @@ USE_CORRECTION = True
 EXPERIMENT = False
 
 # Evaluation
-N_EVAL_EPISODES = 50  # 100
+N_EVAL_EPISODES = 100  # 100
 
 # Export files
 DAILY_REPORT_EXPORT = False

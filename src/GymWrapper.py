@@ -9,7 +9,8 @@ from log_RL import *
 import pandas as pd
 import matplotlib.pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
-from Deep_Q_Network import *
+from DQN import *
+from PPO import *
 
 class GymInterface(gym.Env):
     """
@@ -76,6 +77,35 @@ class GymInterface(gym.Env):
             gamma=GAMMA
             )
             self.buffer = GLOBAL_REPLAY_BUFFER
+            
+        elif RL_ALGORITHM == "PPO":
+            actionSpace = []
+            for i in range(len(I)):
+                if I[i]["TYPE"] == "Material":
+                    actionSpace.append(len(ACTION_SPACE))
+            self.action_space = spaces.Discrete(len(ACTION_SPACE))
+            # if self.scenario["Dist_Type"] == "UNIFORM":
+            #    k = INVEN_LEVEL_MAX*2+(self.scenario["max"]+1)
+
+            os = [
+                INVEN_LEVEL_MAX * 2 + 1 for _ in range(len(I)+MAT_COUNT*INTRANSIT+1)]
+
+            '''
+            - Inventory Level of Product 
+            - Inventory Level of WIP 
+            - Inventory Level of Material 
+            - Intransit Level of Material
+            - Demand - Inventory Level of Product
+            '''
+            
+            self.observation_space = spaces.MultiDiscrete(os)
+            
+            self.agent = PPOAgent(
+            state_dim=self.observation_space.shape[0], 
+            action_dim=self.action_space.n, 
+            lr=LEARNING_RATE, 
+            gamma=GAMMA
+            )
 
 
     def reset(self):
@@ -123,13 +153,20 @@ class GymInterface(gym.Env):
 
         # Send state to GPU and select action using the agent
         state_tensor = torch.tensor(state_real, dtype=torch.float32).unsqueeze(0).to(DEVICE)
-        action = self.agent.select_action(state_tensor)
+        if RL_ALGORITHM == "DQN":
+            action = self.agent.select_action(state_tensor)
+        elif RL_ALGORITHM == "PPO":
+            action, log_prob = self.agent.select_action(state_tensor)
         
         if RL_ALGORITHM == "DQN":
             for _ in range(len(I)):
                 if I[_]["TYPE"] == "Material":
                     I[_]["LOT_SIZE_ORDER"] = action  
                     break
+        elif RL_ALGORITHM == "PPO":
+            for _ in range(len(I)):
+                if I[_]["TYPE"] == "Material":
+                    I[_]["LOT_SIZE_ORDER"] = action
                 
         # Run the simulation for 24 hours (until the next day)
         # Action append
@@ -168,6 +205,11 @@ class GymInterface(gym.Env):
                     if I[_]["TYPE"] == "Material":  
                         print(f"[Order Quantity for {I[_]['NAME']}] ", action)  
                         break  
+            elif RL_ALGORITHM == "PPO":
+                for _ in range(len(I)):
+                    if I[_]["TYPE"] == "Material":
+                        print(f"[Order Quantity for {I[_]['NAME']}] ", action)
+                        break
                     
             # SimPy simulation print
             for log in self.daily_events:
@@ -184,19 +226,29 @@ class GymInterface(gym.Env):
         # Check if the simulation is done
         done = self.simpy_env.now >= SIM_TIME * 24  # 예: SIM_TIME일 이후에 종료
         
-        self.agent.update(batch_size=BATCH_SIZE)
+        if RL_ALGORITHM == "DQN":
+            self.agent.buffer.append((state_real, action, reward, next_state, done))
+        elif RL_ALGORITHM == "PPO":
+            self.agent.store_transition((state_real, action, reward, next_state, done, log_prob))
+        
+        if RL_ALGORITHM == "DQN":
+            self.agent.update(batch_size=BATCH_SIZE)
                 
         if done == True:
+            if RL_ALGORITHM == "PPO":
+                self.agent.update()
+                
             self.writer.add_scalar(
                 "reward", self.total_reward, global_step=self.cur_episode)
-            self.writer.add_scalar(
-                "loss", self.agent.loss, global_step=self.cur_episode)
+            #self.writer.add_scalar(
+                #"loss", self.agent.loss, global_step=self.cur_episode)
             # Log each cost ratio at the end of the episode
             for cost_name, cost_value in self.cost_dict.items():
                 self.writer.add_scalar(
                     cost_name, cost_value, global_step=self.cur_episode)
             self.writer.add_scalars(
                 'Cost', self.cost_dict, global_step=self.cur_episode)
+
             print("Episode: ", self.cur_episode,
                   " / Total reward: ", self.total_reward,
                   " / Action: ", action)
@@ -278,7 +330,10 @@ def evaluate_model(model, env, num_episodes):
             for x in range(len(env.inventoryList)):
                 episode_inventory[x].append(
                     env.inventoryList[x].on_hand_inventory)
-            action = model.select_action(obs, epsilon = max(0.1, 1.0 - N_EPISODES/500))
+            if RL_ALGORITHM == "DQN":
+                action = model.select_action(obs, epsilon = max(0.1, 1.0 - N_EPISODES/500))
+            elif RL_ALGORITHM == "PPO":
+                action = model.select_action(obs)
             obs, reward, done, _ = env.step(action)
             episode_reward += reward  # Accumulate rewards
             ORDER_HISTORY.append(action)  # Log order history
@@ -294,7 +349,8 @@ def evaluate_model(model, env, num_episodes):
         # Calculate mean order for the episode
         order_mean = []
         for key in Mat_Order.keys():
-            order_mean.append(sum(Mat_Order[key]) / len(Mat_Order[key]))
+            order_values = [item[0] for item in Mat_Order[key]]
+            order_mean.append(sum(order_values) / len(order_values)) 
         test_order_mean.append(order_mean)
         COST_RATIO_HISTORY.append(env.cost_dict)
 
