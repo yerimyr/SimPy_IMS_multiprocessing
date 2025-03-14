@@ -101,7 +101,7 @@ class ReplayBuffer:
             torch.FloatTensor(np.array(rewards)).unsqueeze(1),
             torch.FloatTensor(np.array(next_states)),
             torch.FloatTensor(np.array(dones)).unsqueeze(1)
-        )
+        )  
 
     def __len__(self):
         return len(self.buffer)

@@ -67,7 +67,6 @@ def simulation_worker(core_id, model_state_dict, manager):
     
     if len(env_instance.agent.buffer) >= BATCH_SIZE:
         sample = env_instance.agent.buffer.sample(BATCH_SIZE)
-        sample = tuple(x.cpu().numpy() for x in sample)
     else:
         print("Not enough samples")
         sample = None
@@ -130,7 +129,6 @@ if __name__ == '__main__':
             # Process each worker's returned sample batch.
             for sample in results:
                 if sample is not None:
-                    num_batch_size_in_sample = sample[0].shape[0]
                     model.buffer=sample
                     # Update the global model using the global replay buffer with a batch size of BATCH_SIZE.
                     model.update(batch_size=BATCH_SIZE)

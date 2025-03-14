@@ -227,7 +227,7 @@ class GymInterface(gym.Env):
         done = self.simpy_env.now >= SIM_TIME * 24  # 예: SIM_TIME일 이후에 종료
         
         if RL_ALGORITHM == "DQN":
-            self.agent.buffer.append((state_real, action, reward, next_state, done))
+            self.agent.buffer.push(state_real, action, reward, next_state, done)
         elif RL_ALGORITHM == "PPO":
             self.agent.store_transition((state_real, action, reward, next_state, done, log_prob))
         
