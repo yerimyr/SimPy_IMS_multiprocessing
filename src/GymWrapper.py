@@ -153,10 +153,11 @@ class GymInterface(gym.Env):
 
         # Send state to GPU and select action using the agent
         state_tensor = torch.tensor(state_real, dtype=torch.float32).unsqueeze(0).to(DEVICE)
+        
         if RL_ALGORITHM == "DQN":
             action = self.agent.select_action(state_tensor)
         elif RL_ALGORITHM == "PPO":
-            action, log_prob = self.agent.select_action(state_tensor)
+            log_prob = self.agent.policy(state_tensor)[0][action]
         
         if RL_ALGORITHM == "DQN":
             for _ in range(len(I)):
@@ -225,19 +226,8 @@ class GymInterface(gym.Env):
 
         # Check if the simulation is done
         done = self.simpy_env.now >= SIM_TIME * 24  # 예: SIM_TIME일 이후에 종료
-        
-        if RL_ALGORITHM == "DQN":
-            self.agent.buffer.push(state_real, action, reward, next_state, done)
-        elif RL_ALGORITHM == "PPO":
-            self.agent.store_transition((state_real, action, reward, next_state, done, log_prob))
-        
-        if RL_ALGORITHM == "DQN":
-            self.agent.update(batch_size=BATCH_SIZE)
-                
+  
         if done == True:
-            if RL_ALGORITHM == "PPO":
-                self.agent.update()
-                
             self.writer.add_scalar(
                 "reward", self.total_reward, global_step=self.cur_episode)
             #self.writer.add_scalar(

@@ -83,6 +83,7 @@ else:
                     state = next_state
                     
                 model.update() 
+            
         if SAVE_MODEL:
             model.save(os.path.join(SAVED_MODEL_PATH, SAVED_MODEL_NAME))
             print(f"{SAVED_MODEL_NAME} is saved successfully")
