@@ -142,7 +142,6 @@ class PPOAgent:
         next_values[dones == 1] = 0
 
         advantages = self._compute_gae(rewards, values.squeeze(), self.gamma)
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         value_target = rewards + self.gamma * next_values.squeeze() * (1 - dones)
 
         batch_size = BATCH_SIZE  
