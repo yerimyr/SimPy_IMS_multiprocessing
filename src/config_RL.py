@@ -11,9 +11,11 @@ RL_ALGORITHM = "PPO"  # "DQN", "PPO"
 ACTION_SPACE = [0, 1, 2, 3, 4, 5]
 
 BUFFER_SIZE = 100000
-BATCH_SIZE = 20  # Batch size for training (unit: transitions)
+BATCH_SIZE = 64  # Batch size for training (unit: transitions)
 LEARNING_RATE = 0.0001
 GAMMA = 0.99
+CLIP_EPSILON = 0.2
+UPDATE_STEPS = 10
 
 '''
 # State space
@@ -34,7 +36,7 @@ for key in P:
 # maximum production
 
 # Episode
-N_EPISODES = 10000  # 3000
+N_EPISODES = 5000  # 3000
 
 
 def DEFINE_FOLDER(folder_name):

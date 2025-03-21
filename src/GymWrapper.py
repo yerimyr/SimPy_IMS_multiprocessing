@@ -25,6 +25,7 @@ class GymInterface(gym.Env):
         buffer: Replay buffer.
     """
     def __init__(self):
+        self.outer_end = False
         super(GymInterface, self).__init__()
         self.writer = SummaryWriter(log_dir=TENSORFLOW_LOGS)
         if EXPERIMENT:
@@ -37,7 +38,13 @@ class GymInterface(gym.Env):
         self.total_reward_over_episode = []
         self.total_reward = 0
         self.cur_episode = 1
+        self.cur_outer_loop = 1  # Current outer loop
+        self.cur_inner_loop = 1  # Current inner loop
+        self.scenario_batch_size = 99999  # Initialize the scenario batch size
 
+        # For functions that only work when testing the model
+        self.model_test = False
+        
         self.cost_dict = {
             'Holding cost': 0,
             'Process cost': 0,
@@ -48,10 +55,10 @@ class GymInterface(gym.Env):
         os = []
 
         if RL_ALGORITHM == "DQN":
-            actionSpace = []
+            action_space = []
             for i in range(len(I)):
                 if I[i]["TYPE"] == "Material":
-                    actionSpace.append(len(ACTION_SPACE))
+                    action_space.append(len(ACTION_SPACE))
             self.action_space = spaces.Discrete(len(ACTION_SPACE))
             # if self.scenario["Dist_Type"] == "UNIFORM":
             #    k = INVEN_LEVEL_MAX*2+(self.scenario["max"]+1)
@@ -68,28 +75,20 @@ class GymInterface(gym.Env):
             '''
             
             self.observation_space = spaces.MultiDiscrete(os)
-            
-            self.agent = DQNAgent(
-            state_dim=self.observation_space.shape[0], 
-            action_dim=self.action_space.n, 
-            buffer_size=BUFFER_SIZE, 
-            lr=LEARNING_RATE, 
-            gamma=GAMMA
-            )
-            self.buffer = GLOBAL_REPLAY_BUFFER
+
             
         elif RL_ALGORITHM == "PPO":
+            # Define action space
             actionSpace = []
             for i in range(len(I)):
                 if I[i]["TYPE"] == "Material":
                     actionSpace.append(len(ACTION_SPACE))
-            self.action_space = spaces.Discrete(len(ACTION_SPACE))
+            self.action_space = spaces.MultiDiscrete(actionSpace)
             # if self.scenario["Dist_Type"] == "UNIFORM":
             #    k = INVEN_LEVEL_MAX*2+(self.scenario["max"]+1)
 
             os = [
                 INVEN_LEVEL_MAX * 2 + 1 for _ in range(len(I)+MAT_COUNT*INTRANSIT+1)]
-
             '''
             - Inventory Level of Product 
             - Inventory Level of WIP 
@@ -97,15 +96,7 @@ class GymInterface(gym.Env):
             - Intransit Level of Material
             - Demand - Inventory Level of Product
             '''
-            
             self.observation_space = spaces.MultiDiscrete(os)
-            
-            self.agent = PPOAgent(
-            state_dim=self.observation_space.shape[0], 
-            action_dim=self.action_space.n, 
-            lr=LEARNING_RATE, 
-            gamma=GAMMA
-            )
 
 
     def reset(self):
@@ -148,16 +139,6 @@ class GymInterface(gym.Env):
             done: Whether the episode is finished.
             info: Additional information (if any).
         """
-        # Get current state from CPU
-        state_real = self.get_current_state()
-
-        # Send state to GPU and select action using the agent
-        state_tensor = torch.tensor(state_real, dtype=torch.float32).unsqueeze(0).to(DEVICE)
-        
-        if RL_ALGORITHM == "DQN":
-            action = self.agent.select_action(state_tensor)
-        elif RL_ALGORITHM == "PPO":
-            log_prob = self.agent.policy(state_tensor)[0][action]
         
         if RL_ALGORITHM == "DQN":
             for _ in range(len(I)):
@@ -165,9 +146,12 @@ class GymInterface(gym.Env):
                     I[_]["LOT_SIZE_ORDER"] = action  
                     break
         elif RL_ALGORITHM == "PPO":
+            i = 0
             for _ in range(len(I)):
                 if I[_]["TYPE"] == "Material":
-                    I[_]["LOT_SIZE_ORDER"] = action
+                    # Set action as predicted value
+                    I[_]["LOT_SIZE_ORDER"] = action[i]
+                    i += 1
                 
         # Run the simulation for 24 hours (until the next day)
         # Action append
