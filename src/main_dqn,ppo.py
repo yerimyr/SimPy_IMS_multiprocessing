@@ -18,7 +18,9 @@ def build_model():
         model = PPOAgent(state_dim=env.observation_space.shape[0], 
                         action_dims=env.action_space.nvec,  # Adjusted for MultiDiscrete
                         lr=LEARNING_RATE, 
-                        gamma=GAMMA)
+                        gamma=GAMMA,
+                        clip_epsilon=CLIP_EPSILON,
+                        update_steps=UPDATE_STEPS)  
     return model
 
 # Start timing the computation

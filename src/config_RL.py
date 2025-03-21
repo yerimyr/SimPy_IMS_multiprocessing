@@ -12,7 +12,7 @@ ACTION_SPACE = [0, 1, 2, 3, 4, 5]
 
 BUFFER_SIZE = 100000
 BATCH_SIZE = 64  # Batch size for training (unit: transitions)
-LEARNING_RATE = 0.0001
+LEARNING_RATE = 0.00005
 GAMMA = 0.99
 CLIP_EPSILON = 0.2
 UPDATE_STEPS = 10
