@@ -87,6 +87,8 @@ def process_transitions(transitions):
 if __name__ == '__main__':
     multiprocessing.set_start_method('spawn')
 
+    computation_times = []
+    
     for run in range(5):
         print(f"=============== experiment {run+1} ===============")
         env = GymInterface()
@@ -108,7 +110,6 @@ if __name__ == '__main__':
             model = build_model(env)
 
         start_time = time.time()
-        computation_times = []
         episode_counter = 0
         num_groups = math.ceil(N_EPISODES / N_MULTIPROCESS)
 
