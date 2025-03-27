@@ -128,14 +128,14 @@ class PPOAgent:
         if not self.memory:
             print("Memory is empty.")
             return
-
+        
         states, actions, rewards, next_states, dones, log_probs_old = zip(*self.memory)
-        states = torch.tensor(states, dtype=torch.float32, device=self.device)
-        actions = torch.tensor(actions, dtype=torch.long, device=self.device)
-        rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
-        next_states = torch.tensor(next_states, dtype=torch.float32, device=self.device)
-        dones = torch.tensor(dones, dtype=torch.float32, device=self.device)
-        log_probs_old = torch.tensor(log_probs_old, dtype=torch.float32, device=self.device)
+        states = torch.tensor(np.array(states), dtype=torch.float32, device=self.device)
+        actions = torch.tensor(np.array(actions), dtype=torch.long, device=self.device)
+        rewards = torch.tensor(np.array(rewards), dtype=torch.float32, device=self.device)
+        next_states = torch.tensor(np.array(next_states), dtype=torch.float32, device=self.device)
+        dones = torch.tensor(np.array(dones), dtype=torch.float32, device=self.device)
+        log_probs_old = torch.tensor(np.array(log_probs_old), dtype=torch.float32, device=self.device)
 
         _, values = self.policy(states)
         _, next_values = self.policy(next_states)

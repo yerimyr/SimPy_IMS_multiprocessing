@@ -27,7 +27,7 @@ class GymInterface(gym.Env):
     def __init__(self):
         self.outer_end = False
         super(GymInterface, self).__init__()
-        self.writer = SummaryWriter(log_dir=TENSORFLOW_LOGS)
+        #self.writer = SummaryWriter(log_dir=TENSORFLOW_LOGS)
         if EXPERIMENT:
             self.scenario = {}
         else:
@@ -210,19 +210,17 @@ class GymInterface(gym.Env):
 
         # Check if the simulation is done
         done = self.simpy_env.now >= SIM_TIME * 24  # 예: SIM_TIME일 이후에 종료
-  
+        
         if done == True:
+            '''
             self.writer.add_scalar(
                 "reward", self.total_reward, global_step=self.cur_episode)
-            #self.writer.add_scalar(
-                #"loss", self.agent.loss, global_step=self.cur_episode)
-            # Log each cost ratio at the end of the episode
             for cost_name, cost_value in self.cost_dict.items():
                 self.writer.add_scalar(
                     cost_name, cost_value, global_step=self.cur_episode)
             self.writer.add_scalars(
                 'Cost', self.cost_dict, global_step=self.cur_episode)
-
+            '''
             print("Episode: ", self.cur_episode,
                   " / Total reward: ", self.total_reward,
                   " / Action: ", action)
