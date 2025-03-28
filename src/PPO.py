@@ -21,18 +21,18 @@ class ActorCritic(nn.Module):
         # Policy Network (Actor)
         self.actor_fc = nn.Sequential(
             nn.Linear(state_dim, hidden_size),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(hidden_size, hidden_size),
-            nn.ReLU()
+            nn.Tanh()
         )
         self.action_heads = nn.ModuleList([nn.Linear(hidden_size, dim) for dim in action_dims])  # MultiDiscrete
 
         # Value Network (Critic)
         self.critic_fc = nn.Sequential(
             nn.Linear(state_dim, hidden_size),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(hidden_size, hidden_size),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(hidden_size, 1)
         )
     
@@ -69,10 +69,15 @@ class PPOAgent:
         clip_epsilon: Clipping range for PPO.
         update_steps: Number of training epochs per update.
     """
-    def __init__(self, state_dim, action_dims, lr=LEARNING_RATE, gamma=GAMMA, clip_epsilon=CLIP_EPSILON, update_steps=UPDATE_STEPS):
+    def __init__(self, state_dim, action_dims, lr=LEARNING_RATE, gamma=GAMMA, clip_epsilon=CLIP_EPSILON, update_steps=UPDATE_STEPS,
+                gae_lambda=GAE_LAMBDA, ent_coef=ENT_COEF, vf_coef=VF_COEF, max_grad_norm=MAX_GRAD_NORM):
         self.gamma = gamma
         self.clip_epsilon = clip_epsilon
         self.update_steps = update_steps
+        self.gae_lambda = gae_lambda          
+        self.ent_coef = ent_coef              
+        self.vf_coef = vf_coef                
+        self.max_grad_norm = max_grad_norm    
         self.device = DEVICE
     
         self.policy = ActorCritic(state_dim, action_dims).to(self.device)
@@ -141,7 +146,8 @@ class PPOAgent:
         _, next_values = self.policy(next_states)
         next_values[dones == 1] = 0
 
-        advantages = self._compute_gae(rewards, values.squeeze(), self.gamma)
+        advantages = self._compute_gae(rewards, values.squeeze(), self.gamma, self.gae_lambda)
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         value_target = rewards + self.gamma * next_values.squeeze() * (1 - dones)
 
         batch_size = BATCH_SIZE  
@@ -173,14 +179,19 @@ class PPOAgent:
 
                 value_loss = nn.MSELoss()(values_new.squeeze(), batch_value_target.detach())
                 
+                entropy_loss = -torch.stack([Categorical(prob).entropy().mean() for prob in action_probs]).mean()
+                
+                loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
+                
                 self.optimizer.zero_grad()
-                (policy_loss + value_loss).backward(retain_graph=True)
+                loss.backward(retain_graph=True)
+                nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
                 self.optimizer.step()
         
         self.clip_epsilon = max(0.1, self.clip_epsilon * 0.995)
         self.memory.clear()
     
-    def _compute_gae(self, rewards, values, gamma, lambda_=0.95):
+    def _compute_gae(self, rewards, values, gamma, lambda_):
         """
         Computes Generalized Advantage Estimation (GAE) for PPO.
 

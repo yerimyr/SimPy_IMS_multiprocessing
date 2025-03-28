@@ -136,11 +136,13 @@ if __name__ == '__main__':
 
             main_writer.add_scalar(f"reward_core_{i+1}", episode_reward, global_step=global_episode)
         
-        states, actions, rewards, next_states, dones, log_probs = process_transitions(batch_transitions)
-        for j in range(len(states)):
-            model.store_transition((states[j], actions[j], rewards[j], next_states[j], dones[j], log_probs[j]))
-        
-        model.update()
+        for core_index, transitions in enumerate(batch_transitions):
+            states, actions, rewards, next_states, dones, log_probs = process_transitions([transitions])
+
+            for j in range(len(states)):
+                model.store_transition((states[j], actions[j], rewards[j], next_states[j], dones[j], log_probs[j]))
+
+            model.update()
         
         avg_reward = sum(batch_rewards) / len(batch_rewards)
         main_writer.add_scalar("reward_average", avg_reward, global_step=episode_counter + batch_workers)

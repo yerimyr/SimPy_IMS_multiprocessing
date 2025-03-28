@@ -11,11 +11,15 @@ RL_ALGORITHM = "PPO"  # "DQN", "PPO"
 ACTION_SPACE = [0, 1, 2, 3, 4, 5]
 
 BUFFER_SIZE = 100000
-BATCH_SIZE = 64  # Batch size for training (unit: transitions)
-LEARNING_RATE = 0.00005
+BATCH_SIZE = 64  
+LEARNING_RATE = 0.0001
 GAMMA = 0.99
 CLIP_EPSILON = 0.2
-UPDATE_STEPS = 10
+UPDATE_STEPS = 10  
+GAE_LAMBDA = 0.95
+ENT_COEF = 0.0
+VF_COEF = 0.5
+MAX_GRAD_NORM = 0.5
 
 '''
 # State space
@@ -40,11 +44,7 @@ N_EPISODES = 5000  # 3000
 
 
 def DEFINE_FOLDER(folder_name):
-    if os.path.exists(folder_name):
-        file_list = os.listdir(folder_name)
-        folder_name = os.path.join(folder_name, f"Train_{len(file_list)+1}")
-    else:
-        folder_name = os.path.join(folder_name, "Train_1")
+    folder_name = os.path.join(folder_name, "Train_1")
     os.makedirs(folder_name, exist_ok=True)
     return folder_name
 

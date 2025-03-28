@@ -21,7 +21,7 @@ def build_model():
         # model = DDPG("MlpPolicy", env, learning_rate=BEST_PARAMS['learning_rate'], gamma=BEST_PARAMS['gamma'],
         #              batch_size=BEST_PARAMS['batch_size'], verbose=0)
     elif RL_ALGORITHM == "PPO":
-        model = PPO("MlpPolicy", env, verbose=0, learning_rate=0.0001,batch_size=20,n_steps=SIM_TIME)
+        model = PPO("MlpPolicy", env, verbose=0, learning_rate=LEARNING_RATE,batch_size=BATCH_SIZE,n_steps=SIM_TIME)
         # model = PPO("MlpPolicy", env, learning_rate=BEST_PARAMS['learning_rate'], gamma=BEST_PARAMS['gamma'],
         #             batch_size=BEST_PARAMS['batch_size'], n_steps=SIM_TIME, verbose=0)
         print(env.observation_space)
