@@ -2,7 +2,6 @@ import GymWrapper as gw
 import os
 import time
 import multiprocessing
-import math
 import torch
 from GymWrapper import GymInterface 
 from PPO import PPOAgent
@@ -14,17 +13,8 @@ main_writer = SummaryWriter(log_dir=TENSORFLOW_LOGS)
 N_MULTIPROCESS = 5
 
 def build_model(env):
-    """
-    Build and return a PPOAgent model using the environment's state dimension and MAT_COUNT.
-    
-    Args:
-        env (GymInterface): The Gym environment instance.
-        
-    Returns:
-        PPOAgent: A PPO agent instance initialized with proper hyperparameters.
-    """
     state_dim = len(env.reset())
-    action_dims = [len(ACTION_SPACE) for _ in range(MAT_COUNT)]  # MultiDiscrete
+    action_dims = [len(ACTION_SPACE) for _ in range(MAT_COUNT)]
     model = PPOAgent(
         state_dim=state_dim,
         action_dims=action_dims,
@@ -35,19 +25,12 @@ def build_model(env):
     )
     return model
 
-def simulation_worker(core_index, model_state_dict, return_dict):
-    """
-    Run a single episode in a worker process and store both the transitions and the total reward.
-    
-    Args:
-        core_index: The index of the worker (0 to N_MULTIPROCESS-1).
-        model_state_dict: The model parameters from the main process.
-        return_dict: Shared dictionary to store the result.
-    """
+def simulation_worker(core_index, model_state_dict):
     env = GymInterface()
     agent = build_model(env)
     agent.policy.load_state_dict(model_state_dict)
-    
+
+    start_sim_time = time.time()
     state = env.reset()
     done = False
     episode_transitions = []
@@ -58,18 +41,11 @@ def simulation_worker(core_index, model_state_dict, return_dict):
         episode_transitions.append((state, action, reward, next_state, done, log_prob.item()))
         episode_reward += reward
         state = next_state
-    return_dict[core_index] = (episode_transitions, episode_reward)
+    finish_sim_time = time.time()
+    sim_time = finish_sim_time - start_sim_time
+    return (core_index, sim_time, finish_sim_time, episode_transitions, episode_reward)
 
 def process_transitions(transitions):
-    """
-    Combine and unpack transition data collected from multiple worker processes.
-    
-    Args:
-        transitions (list): A list of transition lists, where each inner list is the transitions from one worker.
-        
-    Returns:
-        tuple: Separate lists for states, actions, rewards, next_states, dones, and log_probs.
-    """
     states, actions, rewards, next_states, dones, log_probs = [], [], [], [], [], []
     for worker_transitions in transitions:
         for tr in worker_transitions:
@@ -81,18 +57,24 @@ def process_transitions(transitions):
             log_probs.append(tr[5])
     return states, actions, rewards, next_states, dones, log_probs
 
+def worker_wrapper(args):
+    return simulation_worker(*args)
+
 if __name__ == '__main__':
     multiprocessing.set_start_method('spawn')
-    manager = multiprocessing.Manager()
-    
-    computation_times = []
-    total_episodes = N_EPISODES  
-    episode_counter = 0
-    
-    core_rewards = {i: [] for i in range(N_MULTIPROCESS)}
-    
-    for run in range(5):
-        print("========== experiment {run+1} ==========")
+    pool = multiprocessing.Pool(processes=N_MULTIPROCESS)
+
+    all_experiment_times = []
+
+    for exp_id in range(3):
+        print(f"\n=============== Experiment {exp_id+1} ===============")
+
+        total_episodes = N_EPISODES
+        episode_counter = 0
+        episode_sim_times = []
+        episode_transmit_times = []
+        episode_gpu_update_times = []
+
         env_main = GymInterface()
         if LOAD_MODEL:
             state_dim = len(env_main.reset())
@@ -109,61 +91,61 @@ if __name__ == '__main__':
             print(f"{LOAD_MODEL_NAME} loaded successfully")
         else:
             model = build_model(env_main)
-        
+
         start_time = time.time()
-        
+
         while episode_counter < total_episodes:
             batch_workers = min(N_MULTIPROCESS, total_episodes - episode_counter)
-            processes = []
-            return_dict = manager.dict()
             model_state_dict = model.policy.state_dict()
-            
-            for i in range(batch_workers):
-                p = multiprocessing.Process(
-                    target=simulation_worker,
-                    args=(i, model_state_dict, return_dict)
-                )
-                processes.append(p)
-                p.start()
-            for p in processes:
-                p.join()
-            
-            batch_transitions = []  
-            batch_rewards = []
-            for i in range(batch_workers):
-                transitions, episode_reward = return_dict[i]
-                batch_transitions.append(transitions)
-                batch_rewards.append(episode_reward)
-                core_rewards[i].append(episode_reward)
-                global_episode = episode_counter + i + 1
+            tasks = [(i, model_state_dict) for i in range(batch_workers)]
 
-                main_writer.add_scalar(f"reward_core_{i+1}", episode_reward, global_step=global_episode)
-            
-            for core_index, transitions in enumerate(batch_transitions):
+            sim_times = []
+            transmit_times = []
+
+            for result in pool.imap_unordered(worker_wrapper, tasks):
+                core_index, sim_time, finish_sim_time, transitions, episode_reward = result
+
+                receive_time = time.time()
+                transmit_time = receive_time - finish_sim_time
+
+                sim_times.append(sim_time)
+                transmit_times.append(transmit_time)
+
                 states, actions, rewards, next_states, dones, log_probs = process_transitions([transitions])
-
                 for j in range(len(states)):
                     model.store_transition((states[j], actions[j], rewards[j], next_states[j], dones[j], log_probs[j]))
 
-                model.update()
-            
-            avg_reward = sum(batch_rewards) / len(batch_rewards)
-            main_writer.add_scalar("reward_average", avg_reward, global_step=episode_counter + batch_workers)
-            
-            episode_counter += batch_workers
-            print(f"Completed {episode_counter} / {total_episodes} episodes.")
-        
-        if SAVE_MODEL:
-            model_path = os.path.join(SAVED_MODEL_PATH, SAVED_MODEL_NAME)
-            torch.save(model.policy.state_dict(), model_path)
-            print(f"{SAVED_MODEL_NAME} saved successfully")
-        
+                episode_counter += 1
+                main_writer.add_scalar(f"reward_core_{core_index+1}", episode_reward, global_step=episode_counter)
+                main_writer.add_scalar("reward_average", episode_reward, global_step=episode_counter)
+
+            avg_sim_time = sum(sim_times) / len(sim_times)
+            avg_transmit_time = sum(transmit_times) / len(transmit_times)
+
+            update_start = time.time()
+            model.update()
+            update_end = time.time()
+            gpu_update_time = update_end - update_start
+
+            episode_sim_times.append(avg_sim_time)
+            episode_transmit_times.append(avg_transmit_time)
+            episode_gpu_update_times.append(gpu_update_time)
+
+            print(f"Episode {episode_counter}: Sim {avg_sim_time:.4f}s, Transmit {avg_transmit_time:.4f}s, GPU {gpu_update_time:.4f}s")
+
+        final_avg_sim_time = sum(episode_sim_times) / len(episode_sim_times)
+        final_avg_transmit_time = sum(episode_transmit_times) / len(episode_transmit_times)
+        final_avg_gpu_update_time = sum(episode_gpu_update_times) / len(episode_gpu_update_times)
+
         end_time = time.time()
         computation_time = (end_time - start_time) / 60
-        computation_times.append(computation_time)
-        print(f"Total computation time: {computation_time:.2f} minutes")
-        
-    print("\n========== experiment 5회 완료 ==========")
-    print("각 experiment의 Computation time(분)")
-    for idx, t in enumerate(computation_times, 1):
-        print(f"experiment {idx}: {t:.2f} minutes")
+
+        all_experiment_times.append((final_avg_sim_time, final_avg_transmit_time, final_avg_gpu_update_time, computation_time))
+
+    print("\n=============== Summary of 3 Experiments ===============")
+    for i, (sim, trans, gpu, total) in enumerate(all_experiment_times, 1):
+        print(f"Experiment {i}:")
+        print(f"  Simulation Time Avg: {sim:.4f}s")
+        print(f"  Transmit Time Avg:   {trans:.4f}s")
+        print(f"  GPU Update Time Avg: {gpu:.4f}s")
+        print(f"  Total Computation Time: {total:.2f} minutes\n")

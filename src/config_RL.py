@@ -40,7 +40,7 @@ for key in P:
 # maximum production
 
 # Episode
-N_EPISODES = 30000  # 3000
+N_EPISODES = 100  # 3000
 
 
 def DEFINE_FOLDER(folder_name):
