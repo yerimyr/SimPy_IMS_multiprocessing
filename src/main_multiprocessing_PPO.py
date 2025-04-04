@@ -35,14 +35,16 @@ def build_model(env):
     )
     return model
 
-def simulation_worker(core_index, model_state_dict, return_dict):
+def simulation_worker(core_index, model_state_dict):
     """
-    Run a single episode in a worker process and store both the transitions and the total reward.
+    Run a single episode in a worker process and return the transitions and total reward.
     
     Args:
-        core_index: The index of the worker (0 to N_MULTIPROCESS-1).
-        model_state_dict: The model parameters from the main process.
-        return_dict: Shared dictionary to store the result.
+        core_index: The index of the worker process.
+        model_state_dict: The state dictionary of the main model.
+        
+    Returns:
+        tuple: (core_index, episode_transitions, episode_reward)
     """
     env = GymInterface()
     agent = build_model(env)
@@ -58,15 +60,15 @@ def simulation_worker(core_index, model_state_dict, return_dict):
         episode_transitions.append((state, action, reward, next_state, done, log_prob.item()))
         episode_reward += reward
         state = next_state
-    return_dict[core_index] = (episode_transitions, episode_reward)
+    return (core_index, episode_transitions, episode_reward)
 
 def process_transitions(transitions):
     """
-    Combine and unpack transition data collected from multiple worker processes.
+    Combine and unpack transition data collected from a worker.
     
     Args:
-        transitions (list): A list of transition lists, where each inner list is the transitions from one worker.
-        
+        transitions (list): A list of transition lists from one or more workers.
+    
     Returns:
         tuple: Separate lists for states, actions, rewards, next_states, dones, and log_probs.
     """
@@ -81,9 +83,21 @@ def process_transitions(transitions):
             log_probs.append(tr[5])
     return states, actions, rewards, next_states, dones, log_probs
 
+def worker_wrapper(args):
+    """
+    Wrapper function for simulation_worker to unpack arguments.
+    
+    Args:
+        args (tuple): A tuple containing (core_index, model_state_dict)
+        
+    Returns:
+        tuple: The result of simulation_worker.
+    """
+    return simulation_worker(*args)
+
 if __name__ == '__main__':
     multiprocessing.set_start_method('spawn')
-    manager = multiprocessing.Manager()
+    pool = multiprocessing.Pool(processes=N_MULTIPROCESS)
     
     total_episodes = N_EPISODES  
     episode_counter = 0
@@ -111,44 +125,25 @@ if __name__ == '__main__':
     
     while episode_counter < total_episodes:
         batch_workers = min(N_MULTIPROCESS, total_episodes - episode_counter)
-        processes = []
-        return_dict = manager.dict()
         model_state_dict = model.policy.state_dict()
         
-        for i in range(batch_workers):
-            p = multiprocessing.Process(
-                target=simulation_worker,
-                args=(i, model_state_dict, return_dict)
-            )
-            processes.append(p)
-            p.start()
-        for p in processes:
-            p.join()
+        tasks = [(i, model_state_dict) for i in range(batch_workers)]
         
-        batch_transitions = []  
-        batch_rewards = []
-        for i in range(batch_workers):
-            transitions, episode_reward = return_dict[i]
-            batch_transitions.append(transitions)
-            batch_rewards.append(episode_reward)
-            core_rewards[i].append(episode_reward)
-            global_episode = episode_counter + i + 1
-
-            main_writer.add_scalar(f"reward_core_{i+1}", episode_reward, global_step=global_episode)
-        
-        for core_index, transitions in enumerate(batch_transitions):
+        # Use imap_unordered to retrieve results as soon as they are ready (FIFO order)
+        for result in pool.imap_unordered(worker_wrapper, tasks):
+            core_index, transitions, episode_reward = result
+            global_episode = episode_counter + 1
+            main_writer.add_scalar(f"reward_core_{core_index+1}", episode_reward, global_step=global_episode)
+            
             states, actions, rewards, next_states, dones, log_probs = process_transitions([transitions])
-
             for j in range(len(states)):
                 model.store_transition((states[j], actions[j], rewards[j], next_states[j], dones[j], log_probs[j]))
-
+            
             model.update()
-        
-        avg_reward = sum(batch_rewards) / len(batch_rewards)
-        main_writer.add_scalar("reward_average", avg_reward, global_step=episode_counter + batch_workers)
-        
-        episode_counter += batch_workers
-        print(f"Completed {episode_counter} / {total_episodes} episodes.")
+            episode_counter += 1
+            print(f"Completed {episode_counter} / {total_episodes} episodes.")
+            
+            main_writer.add_scalar("reward_average", episode_reward, global_step=global_episode)
     
     if SAVE_MODEL:
         model_path = os.path.join(SAVED_MODEL_PATH, SAVED_MODEL_NAME)
@@ -158,3 +153,6 @@ if __name__ == '__main__':
     end_time = time.time()
     computation_time = (end_time - start_time) / 60
     print(f"Total computation time: {computation_time:.2f} minutes")
+    
+    pool.close()
+    pool.join()
