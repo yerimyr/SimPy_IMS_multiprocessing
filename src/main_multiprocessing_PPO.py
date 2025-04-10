@@ -130,7 +130,7 @@ if __name__ == '__main__':
         tasks = [(i, model_state_dict) for i in range(batch_workers)]
         
         # Use imap_unordered to retrieve results as soon as they are ready (FIFO order)
-        for result in pool.imap_unordered(worker_wrapper, tasks):
+        for result in pool.imap_unordered(worker_wrapper, tasks):  # imap_unordered: 워커들의 결과를 먼저 끝난 순서대로 반환환
             core_index, transitions, episode_reward = result
             global_episode = episode_counter + 1
             main_writer.add_scalar(f"reward_core_{core_index+1}", episode_reward, global_step=global_episode)

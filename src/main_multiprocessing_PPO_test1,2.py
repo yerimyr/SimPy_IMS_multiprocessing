@@ -13,6 +13,15 @@ main_writer = SummaryWriter(log_dir=TENSORFLOW_LOGS)
 N_MULTIPROCESS = 5
 
 def build_model(env):
+    """
+    Build a PPO model using environment info.
+
+    Args:
+        env: Environment to get state and action dimensions.
+
+    Returns:
+        PPOAgent: Initialized PPO agent with given dimensions.
+    """
     state_dim = len(env.reset())
     action_dims = [len(ACTION_SPACE) for _ in range(MAT_COUNT)]
     model = PPOAgent(
@@ -26,6 +35,16 @@ def build_model(env):
     return model
 
 def simulation_worker(core_index, model_state_dict):
+    """
+    Simulates one episode using a local copy of the PPO model.
+
+    Args:
+        core_index (int): Index of the current process.
+        model_state_dict (dict): State dict from the main PPO model.
+
+    Returns:
+        tuple: (core_index, sim_time, finish_time, transitions, episode_reward)
+    """
     env = GymInterface()
     agent = build_model(env)
     agent.policy.load_state_dict(model_state_dict)
@@ -46,6 +65,15 @@ def simulation_worker(core_index, model_state_dict):
     return (core_index, sim_time, finish_sim_time, episode_transitions, episode_reward)
 
 def process_transitions(transitions):
+    """
+    Processes raw transition tuples into structured component lists.
+
+    Args:
+        transitions (list): List of episode transition tuples.
+
+    Returns:
+        tuple: (states, actions, rewards, next_states, dones, log_probs)
+    """
     states, actions, rewards, next_states, dones, log_probs = [], [], [], [], [], []
     for worker_transitions in transitions:
         for tr in worker_transitions:
@@ -64,11 +92,10 @@ if __name__ == '__main__':
     multiprocessing.set_start_method('spawn')
     pool = multiprocessing.Pool(processes=N_MULTIPROCESS)
 
-    all_experiment_times = []
-
-    for exp_id in range(3):
-        print(f"\n=============== Experiment {exp_id+1} ===============")
-
+    all_experiment_results = []
+    
+    for experiment_idx in range(3):
+        print(f"========== Experiment {experiment_idx+1} ==========")
         total_episodes = N_EPISODES
         episode_counter = 0
         episode_sim_times = []
@@ -139,13 +166,17 @@ if __name__ == '__main__':
 
         end_time = time.time()
         computation_time = (end_time - start_time) / 60
-
-        all_experiment_times.append((final_avg_sim_time, final_avg_transmit_time, final_avg_gpu_update_time, computation_time))
-
-    print("\n=============== Summary of 3 Experiments ===============")
-    for i, (sim, trans, gpu, total) in enumerate(all_experiment_times, 1):
-        print(f"Experiment {i}:")
-        print(f"  Simulation Time Avg: {sim:.4f}s")
-        print(f"  Transmit Time Avg:   {trans:.4f}s")
-        print(f"  GPU Update Time Avg: {gpu:.4f}s")
-        print(f"  Total Computation Time: {total:.2f} minutes\n")
+    
+        all_experiment_results.append({
+            'Sim': final_avg_sim_time,
+            'Transmit': final_avg_transmit_time,
+            'GPU': final_avg_gpu_update_time,
+            'Total_Minutes': computation_time
+        })
+    
+    pool.close()
+    pool.join()
+    
+    print("\n====== Experiment Summary 결과 (3회) ======")
+    for i, result in enumerate(all_experiment_results):
+        print(f"[Experiment {i+1}] Sim: {result['Sim']:.4f}s | Transmit: {result['Transmit']:.4f}s | GPU: {result['GPU']:.4f}s | Total: {result['Total_Minutes']:.2f}min")

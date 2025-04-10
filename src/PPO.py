@@ -144,11 +144,12 @@ class PPOAgent:
 
         _, values = self.policy(states)
         _, next_values = self.policy(next_states)
-        next_values[dones == 1] = 0
+        not_dones = (1 - dones).unsqueeze(1)
+        next_values = (next_values * not_dones).clone()
 
-        advantages = self._compute_gae(rewards, values.squeeze(), self.gamma, self.gae_lambda)
+        advantages = self._compute_gae(rewards, values.detach().squeeze(), self.gamma, self.gae_lambda)
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-        value_target = rewards + self.gamma * next_values.squeeze() * (1 - dones)
+        value_target = rewards + self.gamma * next_values.view(-1).detach()
 
         batch_size = BATCH_SIZE  
         dataset_size = len(states)
@@ -161,8 +162,8 @@ class PPOAgent:
                 batch_states = states[batch_indices]
                 batch_actions = actions[batch_indices]
                 batch_advantages = advantages[batch_indices]
-                batch_log_probs_old = log_probs_old[batch_indices]
-                batch_value_target = value_target[batch_indices]
+                batch_log_probs_old = log_probs_old[batch_indices].detach().clone()
+                batch_value_target = value_target[batch_indices].detach().clone()
 
                 action_probs, values_new = self.policy(batch_states)
                 
@@ -177,14 +178,17 @@ class PPOAgent:
                 surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * batch_advantages
                 policy_loss = -torch.min(surr1, surr2).mean()
 
-                value_loss = nn.MSELoss()(values_new.squeeze(), batch_value_target.detach())
+                value_loss = nn.MSELoss()(values_new.view(-1), batch_value_target)
                 
-                entropy_loss = -torch.stack([Categorical(prob).entropy().mean() for prob in action_probs]).mean()
+                entropy = torch.stack([
+                    Categorical(dist).entropy().mean() for dist in action_probs
+                ]).mean()
+                entropy_loss = -entropy
                 
                 loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
                 
                 self.optimizer.zero_grad()
-                loss.backward(retain_graph=True)
+                loss.backward(retain_graph=True)  
                 nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
                 self.optimizer.step()
         

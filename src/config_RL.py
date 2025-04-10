@@ -3,7 +3,8 @@ import shutil
 from config_SimPy import *
 import torch
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cpu")
 
 # RL algorithms
 RL_ALGORITHM = "PPO"  # "DQN", "PPO"
@@ -40,7 +41,7 @@ for key in P:
 # maximum production
 
 # Episode
-N_EPISODES = 100  # 3000
+N_EPISODES = 3000  # 3000
 
 
 def DEFINE_FOLDER(folder_name):
