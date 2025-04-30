@@ -81,113 +81,91 @@ if __name__ == '__main__':
     multiprocessing.set_start_method('spawn')
     pool = multiprocessing.Pool(processes=N_MULTIPROCESS)
 
-    all_experiment_results = []
+    total_episodes = N_EPISODES
+    episode_counter = 0
 
-    for experiment_idx in range(3):
-        print(f"========== Experiment {experiment_idx+1} ==========")
-        total_episodes = N_EPISODES
-        episode_counter = 0
+    # timing records
+    episode_param_copy_times = []
+    episode_sampling_times = []
+    episode_transmit_times = []
+    episode_learning_times = []
 
-        # timing records
-        episode_param_copy_times = []
-        episode_sampling_times = []
-        episode_transmit_times = []
-        episode_learning_times = []
-
-        # build or load main model on GPU
-        env_main = GymInterface()
-        if LOAD_MODEL:
-            model = build_model(env_main)
-            model.policy.load_state_dict(
-                torch.load(os.path.join(SAVED_MODEL_PATH, LOAD_MODEL_NAME))
-            )
-            print(f"{LOAD_MODEL_NAME} loaded successfully")
-        else:
-            model = build_model(env_main)
-
-        start_time = time.time()
-
-        while episode_counter < total_episodes:
-            batch_workers = min(N_MULTIPROCESS, total_episodes - episode_counter)
-            # measure parameter copy time
-            start_copy = time.time()
-            model_state_dict = model.policy.state_dict()
-            param_copy = time.time() - start_copy
-            episode_param_copy_times.append(param_copy)
-
-            tasks = [(i, model_state_dict) for i in range(batch_workers)]
-
-            sampling_times = []
-            transmit_times = []
-
-            # independent buffer: process as workers finish
-            for core_index, sampling, finish_sim_time, transitions, episode_reward in pool.imap_unordered(worker_wrapper, tasks):  ########## independent buffer 구현 부분 ##########
-                receive_time = time.time()
-                transfer = receive_time - finish_sim_time
-
-                sampling_times.append(sampling)
-                transmit_times.append(transfer)
-
-                # store transitions
-                states, actions, rewards, next_states, dones, log_probs = process_transitions([transitions])
-                for s, a, r, ns, d, lp in zip(states, actions, rewards, next_states, dones, log_probs):
-                    model.store_transition((s, a, r, ns, d, lp))
-
-                # learning update
-                start_learn = time.time()
-                model.update()
-                learn = time.time() - start_learn
-                episode_learning_times.append(learn)
-
-                episode_counter += 1
-                main_writer.add_scalar(f"reward_core_{core_index+1}", episode_reward, episode_counter)
-                main_writer.add_scalar("reward_average", episode_reward, episode_counter)
-
-                print(
-                    f"Worker {core_index} done — episode {episode_counter}: "
-                    f"Copy {param_copy:.3f}s, Sampling {sampling:.3f}s, "
-                    f"Transfer {transfer:.3f}s, Learn {learn:.3f}s"
-                )
-
-            avg_sampling = sum(sampling_times) / len(sampling_times)
-            avg_transfer = sum(transmit_times) / len(transmit_times)
-
-            episode_sampling_times.append(avg_sampling)
-            episode_transmit_times.append(avg_transfer)
-
-        # experiment summary
-        total_time = (time.time() - start_time) / 60
-        avg_param_copy = sum(episode_param_copy_times) / len(episode_param_copy_times)
-        avg_sampling = sum(episode_sampling_times) / len(episode_sampling_times)
-        avg_transfer = sum(episode_transmit_times) / len(episode_transmit_times)
-        avg_learning = sum(episode_learning_times) / len(episode_learning_times)
-
-        print(
-            f"\n[Experiment {experiment_idx+1} Summary] "
-            f"Copy {avg_param_copy:.3f}s | "
-            f"Sampling {avg_sampling:.3f}s | "
-            f"Transfer {avg_transfer:.3f}s | "
-            f"Learn {avg_learning:.3f}s | "
-            f"Total {total_time:.2f}min\n"
+    # build or load main model on GPU
+    env_main = GymInterface()
+    if LOAD_MODEL:
+        model = build_model(env_main)
+        model.policy.load_state_dict(
+            torch.load(os.path.join(SAVED_MODEL_PATH, LOAD_MODEL_NAME))
         )
+        print(f"{LOAD_MODEL_NAME} loaded successfully")
+    else:
+        model = build_model(env_main)
 
-        all_experiment_results.append({
-            'Copy': avg_param_copy,
-            'Sampling': avg_sampling,
-            'Transfer': avg_transfer,
-            'Learn': avg_learning,
-            'Total_Minutes': total_time
-        })
+    start_time = time.time()
+
+    while episode_counter < total_episodes:
+        batch_workers = min(N_MULTIPROCESS, total_episodes - episode_counter)
+        # measure parameter copy time
+        start_copy = time.time()
+        model_state_dict = model.policy.state_dict()
+        param_copy = time.time() - start_copy
+        episode_param_copy_times.append(param_copy)
+
+        tasks = [(i, model_state_dict) for i in range(batch_workers)]
+
+        sampling_times = []
+        transmit_times = []
+
+        # independent buffer: process as workers finish
+        for core_index, sampling, finish_sim_time, transitions, episode_reward in pool.imap_unordered(worker_wrapper, tasks):  ########## independent buffer 구현 부분 ##########
+            receive_time = time.time()
+            transfer = receive_time - finish_sim_time
+
+            sampling_times.append(sampling)
+            transmit_times.append(transfer)
+
+            # store transitions
+            states, actions, rewards, next_states, dones, log_probs = process_transitions([transitions])
+            for s, a, r, ns, d, lp in zip(states, actions, rewards, next_states, dones, log_probs):
+                model.store_transition((s, a, r, ns, d, lp))
+
+            # learning update
+            start_learn = time.time()
+            model.update()
+            learn = time.time() - start_learn
+            episode_learning_times.append(learn)
+
+            episode_counter += 1
+            main_writer.add_scalar(f"reward_core_{core_index+1}", episode_reward, episode_counter)
+            main_writer.add_scalar("reward_average", episode_reward, episode_counter)
+
+            print(
+                f"Worker {core_index} done — episode {episode_counter}: "
+                f"Copy {param_copy:.3f}s, Sampling {sampling:.3f}s, "
+                f"Transfer {transfer:.3f}s, Learn {learn:.3f}s"
+            )
+
+        avg_sampling = sum(sampling_times) / len(sampling_times)
+        avg_transfer = sum(transmit_times) / len(transmit_times)
+
+        episode_sampling_times.append(avg_sampling)
+        episode_transmit_times.append(avg_transfer)
+
+    # experiment summary
+    total_time = (time.time() - start_time) / 60
+    avg_param_copy = sum(episode_param_copy_times) / len(episode_param_copy_times)
+    avg_sampling = sum(episode_sampling_times) / len(episode_sampling_times)
+    avg_transfer = sum(episode_transmit_times) / len(episode_transmit_times)
+    avg_learning = sum(episode_learning_times) / len(episode_learning_times)
+
+    print(
+        f"\n[Experiment Summary] "
+        f"Copy {avg_param_copy:.3f}s | "
+        f"Sampling {avg_sampling:.3f}s | "
+        f"Transfer {avg_transfer:.3f}s | "
+        f"Learn {avg_learning:.3f}s | "
+        f"Total {total_time:.2f}min\n"
+    )
 
     pool.close()
     pool.join()
-
-    print("====== All Experiments Summary ======")
-    for i, res in enumerate(all_experiment_results, 1):
-        print(
-            f"[Exp {i}] Copy: {res['Copy']:.3f}s | "
-            f"Sampling: {res['Sampling']:.3f}s | "
-            f"Transfer: {res['Transfer']:.3f}s | "
-            f"Learn: {res['Learn']:.3f}s | "
-            f"Total: {res['Total_Minutes']:.2f}min"
-        )
