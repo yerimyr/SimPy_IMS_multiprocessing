@@ -168,6 +168,7 @@ if __name__ == '__main__':
             main_writer.add_scalar("reward_average", episode_reward, episode_counter)
 
         # store all transitions at once
+        start_total_learning = time.time()
         states, actions, rewards, next_states, dones, log_probs = process_transitions([all_transitions])
         for s, a, r, ns, d, lp in zip(states, actions, rewards, next_states, dones, log_probs):
             model.store_transition((s, a, r, ns, d, lp))
@@ -176,7 +177,6 @@ if __name__ == '__main__':
         avg_transfer = sum(transmit_times) / len(transmit_times)
 
         # total learning update on GPU
-        start_total_learning = time.time()
         model.update()
         total_learning = time.time() - start_total_learning
         episode_learning_times.append(total_learning)

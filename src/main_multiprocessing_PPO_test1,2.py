@@ -160,12 +160,12 @@ if __name__ == '__main__':
             transmit_times.append(transfer)
 
             # store transitions
+            start_total_learn = time.time()
             states, actions, rewards, next_states, dones, log_probs = process_transitions([transitions])
             for s, a, r, ns, d, lp in zip(states, actions, rewards, next_states, dones, log_probs):
                 model.store_transition((s, a, r, ns, d, lp))
 
             # total learning update
-            start_total_learn = time.time()
             model.update()
             total_learn = time.time() - start_total_learn
             episode_total_learning_times.append(total_learn)

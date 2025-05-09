@@ -150,7 +150,7 @@ if __name__ == '__main__':
         for core_index, sampling, finish_sim_time, transitions, episode_reward in pool.imap_unordered(worker_wrapper, tasks):  ########## independent buffer 구현 부분 ##########
             
             # validation) independent buffer 확인: imap_unordered 순서대로 결과 받음
-            print(f"[Main] Got result from worker {core_index} at {time.time():.3f}")
+            #print(f"[Main] Got result from worker {core_index} at {time.time():.3f}")
             
             receive_time = time.time()
             transfer = receive_time - finish_sim_time
@@ -159,12 +159,12 @@ if __name__ == '__main__':
             transmit_times.append(transfer)
 
             # store transitions
+            start_total_learn = time.time()
             states, actions, rewards, next_states, dones, log_probs = process_transitions([transitions])
             for s, a, r, ns, d, lp in zip(states, actions, rewards, next_states, dones, log_probs):
                 model.store_transition((s, a, r, ns, d, lp))
 
             # total learning update on GPU
-            start_total_learn = time.time()
             model.update()
             total_learn = time.time() - start_total_learn
             episode_total_learning_times.append(total_learn)
