@@ -26,6 +26,10 @@ def build_model(env):
         clip_epsilon=CLIP_EPSILON,
         update_steps=UPDATE_STEPS
     )
+    
+    # validation) 학습용 모델(device) 위치 확인
+    #print(f"[Main] Training model on device: {model.device}")
+    
     return model
 
 def simulation_worker(core_index, model_state_dict):
@@ -42,14 +46,29 @@ def simulation_worker(core_index, model_state_dict):
     env = GymInterface()
     agent = build_model(env)
     agent.policy.load_state_dict(model_state_dict)
+    
+    # validation) 추론용 모델이 코어 개수만큼 있는지 확인
+    #print(f"[Worker {core_index} PID {os.getpid()}] Inference model id: {id(agent.policy)}")
 
+    # validation) 추론용 모델이 CPU/GPU에 남아있는지 확인
+    #print(f"[Worker {core_index} | PID {os.getpid()}] Inference model.device: {agent.device}")
+    #print(f"[Worker {core_index}] first_param.device: {next(agent.policy.parameters()).device}")
+    
     start_sim_time = time.time()
     state = env.reset()
+    
+    # validation) 시뮬레이터가 CPU에서 동작하는지 확인
+    #print(f"[Worker {core_index}] state type: {type(state)}")  # list 혹은 numpy.ndarray 여야 함
+    
     done = False
     episode_transitions = []
     episode_reward = 0
     while not done:
         action, log_prob = agent.select_action(state)  ########## 추론용모델(gpu) 구현 부분 ##########
+        
+        # validation) select_action()이 어디에서 돌아가는지 -> 추론용모델의 위치 확인
+        #print(f"[Worker {core_index}] log_prob.device: {log_prob.device}")
+        
         next_state, reward, done, _ = env.step(action)
         episode_transitions.append((state, action, reward, next_state, done, log_prob.item()))
         episode_reward += reward
@@ -88,6 +107,7 @@ if __name__ == '__main__':
     episode_param_copy_times = []
     episode_sampling_times = []
     episode_transmit_times = []
+    episode_total_learning_times = []
     episode_learning_times = []
 
     # build or load main model on GPU
@@ -100,6 +120,17 @@ if __name__ == '__main__':
         print(f"{LOAD_MODEL_NAME} loaded successfully")
     else:
         model = build_model(env_main)
+        
+        # validation) 전체 파라미터 수 (bias 포함)
+        #total_params = sum(p.numel() for p in model.policy.parameters())
+        #print(f"Total parameters: {total_params}")
+
+        # validation) 학습 가능한(trainable) 파라미터 수
+        #trainable_params = sum(p.numel() for p in model.policy.parameters() if p.requires_grad)
+        #print(f"Trainable parameters: {trainable_params}")
+
+        # validation) 학습용 모델이 1개인지 확인
+        #print(f"[Main PID {os.getpid()}] Training model id: {id(model.policy)}")
 
     start_time = time.time()
 
@@ -118,6 +149,10 @@ if __name__ == '__main__':
 
         # independent buffer: process as workers finish
         for core_index, sampling, finish_sim_time, transitions, episode_reward in pool.imap_unordered(worker_wrapper, tasks):  ########## independent buffer 구현 부분 ##########
+            
+            # validation) independent buffer 확인: imap_unordered 순서대로 결과 받음
+            #print(f"[Main] Got result from worker {core_index} at {time.time():.3f}")
+            
             receive_time = time.time()
             transfer = receive_time - finish_sim_time
 
@@ -129,12 +164,16 @@ if __name__ == '__main__':
             for s, a, r, ns, d, lp in zip(states, actions, rewards, next_states, dones, log_probs):
                 model.store_transition((s, a, r, ns, d, lp))
 
-            # learning update
-            start_learn = time.time()
+            # total learning update
+            start_total_learn = time.time()
             model.update()
-            learn = time.time() - start_learn
+            total_learn = time.time() - start_total_learn
+            episode_total_learning_times.append(total_learn)
+            
+            # learning time
+            learn = model.learn_time
             episode_learning_times.append(learn)
-
+            
             episode_counter += 1
             main_writer.add_scalar(f"reward_core_{core_index+1}", episode_reward, episode_counter)
             main_writer.add_scalar("reward_average", episode_reward, episode_counter)
@@ -142,7 +181,7 @@ if __name__ == '__main__':
             print(
                 f"Worker {core_index} done — episode {episode_counter}: "
                 f"Copy {param_copy:.3f}s, Sampling {sampling:.3f}s, "
-                f"Transfer {transfer:.3f}s, Learn {learn:.3f}s"
+                f"Transfer {transfer:.3f}s, Total_Learn {total_learn:.3f}s, Learn {learn:.3f}s"
             )
 
         avg_sampling = sum(sampling_times) / len(sampling_times)
@@ -156,15 +195,17 @@ if __name__ == '__main__':
     avg_param_copy = sum(episode_param_copy_times) / len(episode_param_copy_times)
     avg_sampling = sum(episode_sampling_times) / len(episode_sampling_times)
     avg_transfer = sum(episode_transmit_times) / len(episode_transmit_times)
-    avg_learning = sum(episode_learning_times) / len(episode_learning_times)
+    avg_total_learning = sum(episode_total_learning_times) / len(episode_total_learning_times)
+    avg_learning = sum(episode_learning_times)/len(episode_learning_times)
 
     print(
         f"\n[Experiment Summary] "
-        f"Copy {avg_param_copy:.3f}s | "
-        f"Sampling {avg_sampling:.3f}s | "
-        f"Transfer {avg_transfer:.3f}s | "
-        f"Learn {avg_learning:.3f}s | "
-        f"Total {total_time:.2f}min\n"
+        f"Copy {avg_param_copy:.6f}s | "
+        f"Sampling {avg_sampling:.6f}s | "
+        f"Transfer {avg_transfer:.6f}s | "
+        f"Total_Learn {avg_total_learning:.6f}s | "
+        f"Learn {avg_learning:.6f}s | "
+        f"Total {total_time:.6f}min\n"
     )
 
     pool.close()

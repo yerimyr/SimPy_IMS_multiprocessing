@@ -4,6 +4,7 @@ import torch.optim as optim
 import numpy as np
 from torch.distributions import Categorical
 from config_RL import *
+import time
 
 class ActorCritic(nn.Module):
     """
@@ -156,6 +157,7 @@ class PPOAgent:
         indices = np.arange(dataset_size)
         np.random.shuffle(indices)
 
+        start_time = time.time()
         for _ in range(self.update_steps):
             for i in range(0, dataset_size, batch_size):
                 batch_indices = indices[i : i + batch_size]
@@ -191,6 +193,10 @@ class PPOAgent:
                 loss.backward(retain_graph=True)  
                 nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
                 self.optimizer.step()
+                
+                self.learn_time=time.time()-start_time
+                
+                return self.learn_time
         
         self.clip_epsilon = max(0.1, self.clip_epsilon * 0.995)
         self.memory.clear()
