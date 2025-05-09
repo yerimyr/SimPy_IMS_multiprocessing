@@ -143,7 +143,7 @@ if __name__ == '__main__':
         sampling_times = []
         transmit_times = []
 
-        # valdiation) integrated buffer가 맞는지 확인
+        # validation) integrated buffer가 맞는지 확인
         #print(f"[Main] Integrated buffer: pool.map 시작 -> {batch_workers} tasks")
         #start_collect = time.time()
         # integrated buffer: gather all worker results synchronously
