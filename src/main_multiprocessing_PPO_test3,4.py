@@ -10,7 +10,7 @@ from PPO import PPOAgent
 from config_RL import *
 
 main_writer = SummaryWriter(log_dir=TENSORFLOW_LOGS)
-N_MULTIPROCESS = 5
+N_MULTIPROCESS = 1
 
 def build_model(env):
     """
@@ -195,9 +195,9 @@ if __name__ == '__main__':
 
     print(
         f"\n[Experiment Summary] "
-        f"Copy {final_avg_copy:.3f}s | Sampling {final_avg_sampling:.3f}s | "
-        f"Transfer {final_avg_transfer:.3f}s | Setup_Learning {final_avg_total_learning:.3f}s | Learning {final_avg_learning:.3f}s"
-        f"Total {total_time:.2f}min\n"
+        f"Copy {final_avg_copy:.6f}s | Sampling {final_avg_sampling:.6f}s | "
+        f"Transfer {final_avg_transfer:.6f}s | Setup_Learning {final_avg_total_learning:.6f}s | Learning {final_avg_learning:.6f}s"
+        f"Total {total_time:.6f}min\n"
     )
 
     pool.close()
