@@ -10,7 +10,7 @@ from PPO import PPOAgent
 from config_RL import *
 
 main_writer = SummaryWriter(log_dir=TENSORFLOW_LOGS)
-N_MULTIPROCESS = 5
+N_MULTIPROCESS = 1
 
 def build_model(env):
     """
@@ -179,7 +179,7 @@ if __name__ == '__main__':
         # total learning update on GPU
         model.update()
         total_learning = time.time() - start_total_learning
-        episode_learning_times.append(total_learning)
+        episode_total_learning_times.append(total_learning)
 
         # learning time
         learn = model.learn_time
