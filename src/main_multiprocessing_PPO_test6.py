@@ -201,7 +201,7 @@ if __name__ == '__main__':
     print(
         f"\n[Experiment Summary] "
         f"Copy {final_avg_copy:.6f}s | Sampling {final_avg_sampling:.6f}s | "
-        f"Transfer {final_avg_transfer:.6f}s | Setup_Learning {final_avg_total_learning:.6f}s | Learning {final_avg_learning:.6f}s"
+        f"Transfer {final_avg_transfer:.6f}s | Total_Learning {final_avg_total_learning:.6f}s | Learning {final_avg_learning:.6f}s |"
         f"Total {total_time:.6f}min\n"
     )
 
