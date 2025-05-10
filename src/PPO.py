@@ -195,11 +195,11 @@ class PPOAgent:
                 self.optimizer.step()
                 
                 self.learn_time=time.time()-start_time
-                
-                return self.learn_time
         
         self.clip_epsilon = max(0.1, self.clip_epsilon * 0.995)
         self.memory.clear()
+        
+        return self.learn_time
     
     def _compute_gae(self, rewards, values, gamma, lambda_):
         """
