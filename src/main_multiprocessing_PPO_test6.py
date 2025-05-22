@@ -1,16 +1,14 @@
 import os
 import time
 import multiprocessing
-
 import torch
 from torch.utils.tensorboard import SummaryWriter
-
 from GymWrapper import GymInterface
 from PPO import PPOAgent
 from config_RL import *
 
 main_writer = SummaryWriter(log_dir=TENSORFLOW_LOGS)
-N_MULTIPROCESS = 1
+N_MULTIPROCESS = 5
 
 def build_model(env):
     """
@@ -35,6 +33,13 @@ def build_model(env):
 def simulation_worker(core_index, model_state_dict):
     """
     Simulates one episode using a local copy of the PPO model.
+
+    Args:
+        core_index (int): Index of the current process.
+        model_state_dict (dict): State dict from the main PPO model.
+
+    Returns:
+        tuple: (core_index, sim_time, finish_time, transitions, episode_reward)
     """
     env = GymInterface()
     agent = build_model(env)
@@ -76,7 +81,7 @@ def simulation_worker(core_index, model_state_dict):
 
 def process_transitions(transitions):
     """
-    Processes raw transition tuples into structured component lists.
+    Flattens a list of per-worker transition lists.
     """
     states, actions, rewards, next_states, dones, log_probs = [], [], [], [], [], []
     for worker_transitions in transitions:
@@ -102,7 +107,7 @@ if __name__ == '__main__':
     # timing records
     episode_copy_times = []
     episode_sampling_times = []
-    episode_transmit_times = []
+    episode_transfer_times = []
     episode_total_learning_times = []
     episode_learning_times = []
 
@@ -141,7 +146,7 @@ if __name__ == '__main__':
         tasks = [(i, model_state_dict) for i in range(batch_workers)]
 
         sampling_times = []
-        transmit_times = []
+        transfer_times = []
 
         # validation) integrated buffer가 맞는지 확인
         #print(f"[Main] Integrated buffer: pool.map 시작 -> {batch_workers} tasks")
@@ -157,12 +162,13 @@ if __name__ == '__main__':
             transfer = receive_time - finish_sampling
 
             episode_sampling_times.append(sampling)
-            episode_transmit_times.append(transfer)
+            episode_transfer_times.append(transfer)
 
             sampling_times.append(sampling)
-            transmit_times.append(transfer)
+            transfer_times.append(transfer)
             all_transitions.extend(transitions)
 
+            # tensorboard
             episode_counter += 1
             main_writer.add_scalar(f"reward_core_{core_index+1}", episode_reward, episode_counter)
             main_writer.add_scalar("reward_average", episode_reward, episode_counter)
@@ -174,7 +180,7 @@ if __name__ == '__main__':
             model.store_transition((s, a, r, ns, d, lp))
 
         avg_sampling = sum(sampling_times) / len(sampling_times)
-        avg_transfer = sum(transmit_times) / len(transmit_times)
+        avg_transfer = sum(transfer_times) / len(transfer_times)
 
         # total learning update on GPU
         model.update()
@@ -192,16 +198,19 @@ if __name__ == '__main__':
 
     # experiment summary
     total_time = (time.time() - start_time) / 60
-    final_avg_copy = sum(episode_copy_times) / len(episode_copy_times)
+    final_avg_param_copy = sum(episode_copy_times) / len(episode_copy_times)
     final_avg_sampling = sum(episode_sampling_times) / len(episode_sampling_times)
-    final_avg_transfer = sum(episode_transmit_times) / len(episode_transmit_times)
+    final_avg_transfer = sum(episode_transfer_times) / len(episode_transfer_times)
     final_avg_total_learning = sum(episode_total_learning_times) / len(episode_total_learning_times)
     final_avg_learning = sum(episode_learning_times) / len(episode_learning_times)
 
     print(
         f"\n[Experiment Summary] "
-        f"Copy {final_avg_copy:.6f}s | Sampling {final_avg_sampling:.6f}s | "
-        f"Transfer {final_avg_transfer:.6f}s | Total_Learning {final_avg_total_learning:.6f}s | Learning {final_avg_learning:.6f}s |"
+        f"Copy {final_avg_param_copy:.6f}s | "
+        f"Sampling {final_avg_sampling:.6f}s | "
+        f"Transfer {final_avg_transfer:.6f}s | "
+        f"Total_Learn {final_avg_total_learning:.6f}s | "
+        f"Learn {final_avg_learning:.6f}s | "
         f"Total {total_time:.6f}min\n"
     )
 

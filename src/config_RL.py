@@ -3,6 +3,7 @@ import shutil
 from config_SimPy import *
 import torch
 
+# change the device
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #DEVICE = torch.device("cpu")
 
@@ -13,7 +14,7 @@ ACTION_SPACE = [0, 1, 2, 3, 4, 5]
 
 BUFFER_SIZE = 100000
 BATCH_SIZE = 64  
-LEARNING_RATE = 0.00005
+LEARNING_RATE = 0.0001
 GAMMA = 0.99
 CLIP_EPSILON = 0.2
 UPDATE_STEPS = 10  
@@ -41,11 +42,12 @@ for key in P:
 # maximum production
 
 # Episode
-N_EPISODES = 100  # 3000
+N_EPISODES = 3000  # 3000
 
 
 def DEFINE_FOLDER(folder_name):
-    folder_name = os.path.join(folder_name, "Train_1")
+    file_list = os.listdir(folder_name)
+    folder_name = os.path.join(folder_name, f"Train_{len(file_list)+1}")
     os.makedirs(folder_name, exist_ok=True)
     return folder_name
 
