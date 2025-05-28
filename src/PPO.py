@@ -15,13 +15,15 @@ class ActorCritic(nn.Module):
         action_dims: List containing the number of discrete actions per action dimension.
         hidden_size: Number of neurons in hidden layers.
     """
-    def __init__(self, state_dim, action_dims, hidden_size=64):
+    def __init__(self, state_dim, action_dims, hidden_size=256):
         super(ActorCritic, self).__init__()
         self.action_dims = action_dims
 
         # Policy Network (Actor)
         self.actor_fc = nn.Sequential(
             nn.Linear(state_dim, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, hidden_size),
             nn.Tanh(),
             nn.Linear(hidden_size, hidden_size),
             nn.Tanh()
@@ -31,6 +33,8 @@ class ActorCritic(nn.Module):
         # Value Network (Critic)
         self.critic_fc = nn.Sequential(
             nn.Linear(state_dim, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, hidden_size),
             nn.Tanh(),
             nn.Linear(hidden_size, hidden_size),
             nn.Tanh(),

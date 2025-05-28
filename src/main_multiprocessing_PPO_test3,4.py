@@ -8,7 +8,7 @@ from PPO import PPOAgent
 from config_RL import *
 
 main_writer = SummaryWriter(log_dir=TENSORFLOW_LOGS)
-N_MULTIPROCESS = 5
+N_MULTIPROCESS = 1
 
 def build_model(env):
     """

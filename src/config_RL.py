@@ -4,8 +4,8 @@ from config_SimPy import *
 import torch
 
 # change the device
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-#DEVICE = torch.device("cpu")
+#DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cpu")
 
 # RL algorithms
 RL_ALGORITHM = "PPO"  # "DQN", "PPO"
@@ -14,7 +14,7 @@ ACTION_SPACE = [0, 1, 2, 3, 4, 5]
 
 BUFFER_SIZE = 100000
 BATCH_SIZE = 64  
-LEARNING_RATE = 0.0001
+LEARNING_RATE = 0.00001
 GAMMA = 0.99
 CLIP_EPSILON = 0.2
 UPDATE_STEPS = 10  
