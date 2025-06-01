@@ -8,7 +8,7 @@ from PPO import PPOAgent
 from config_RL import *
 
 main_writer = SummaryWriter(log_dir=TENSORFLOW_LOGS)
-N_MULTIPROCESS = 5
+N_MULTIPROCESS = 1
 
 def build_model(env):
     """
@@ -160,7 +160,7 @@ if __name__ == '__main__':
             transfer = receive_time - finish_sim_time
 
             sampling_times.append(sampling)
-            transfer.append(transfer)
+            transfer_times.append(transfer)
 
             # store transitions
             start_total_learn = time.time()
