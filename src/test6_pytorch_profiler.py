@@ -6,9 +6,25 @@ from torch.utils.tensorboard import SummaryWriter
 from GymWrapper import GymInterface
 from PPO import PPOAgent
 from config_RL import *
+import torch.profiler
 
 main_writer = SummaryWriter(log_dir=TENSORFLOW_LOGS)
-N_MULTIPROCESS = 1
+
+profiler = torch.profiler.profile(
+    schedule=torch.profiler.schedule(
+        wait=1,  
+        warmup=1,  
+        active=2,  
+        repeat=1
+    ),
+    on_trace_ready=torch.profiler.tensorboard_trace_handler(TENSORFLOW_LOGS),
+    record_shapes=True,
+    with_stack=False,
+    profile_memory=True,
+    with_flops=True
+)
+
+N_MULTIPROCESS = 5
 
 def build_model(env):
     """
@@ -44,6 +60,9 @@ def simulation_worker(core_index, model_state_dict):
     env = GymInterface()
     agent = build_model(env)
     agent.policy.load_state_dict(model_state_dict)
+    # Move the inference model to CPU
+    agent.policy.to('cpu')  
+    agent.device = torch.device('cpu') 
     
     # validation) Verify one inference model per core
     #print(f"[Worker {core_index} PID {os.getpid()}] Inference model id: {id(agent.policy)}")
@@ -62,7 +81,9 @@ def simulation_worker(core_index, model_state_dict):
     episode_transitions = []
     episode_reward = 0
     while not done:
-        action, log_prob = agent.select_action(state)  
+        with profiler as p:
+            action, log_prob = agent.select_action(state)
+            p.step()
         
         # validation) Verify where select_action() is executed (inference model location)
         #print(f"[Worker {core_index}] log_prob.device: {log_prob.device}")
@@ -118,7 +139,7 @@ if __name__ == '__main__':
         print(f"{LOAD_MODEL_NAME} loaded successfully")
     else:
         model = build_model(env_main)
-
+        
         # validation) Total parameter count
         #total_params = sum(p.numel() for p in model.policy.parameters())
         #print(f"Total parameters: {total_params}")
@@ -126,10 +147,10 @@ if __name__ == '__main__':
         # validation) Trainable parameter count
         #trainable_params = sum(p.numel() for p in model.policy.parameters() if p.requires_grad)
         #print(f"Trainable parameters: {trainable_params}")
-        
+
         # validation) Verify single training model
         #print(f"[Main PID {os.getpid()}] Training model id: {id(model.policy)}")
-        
+
     start_time = time.time()
 
     while episode_counter < total_episodes:
@@ -148,13 +169,11 @@ if __name__ == '__main__':
         # validation) Check integrated buffer
         #print(f"[Main] Integrated buffer: pool.map start -> {batch_workers} tasks")
         #start_collect = time.time()
-        
         # integrated buffer: gather all worker results synchronously
         results = pool.map(worker_wrapper, tasks)  
-        
         #collect_time = time.time() - start_collect
         #print(f"[Main] Integrated buffer: all workers finished ({len(results)} results) collect time {collect_time:.3f}s")
-        
+
         all_transitions = []
         for core_index, sampling, finish_sampling, transitions, episode_reward in results:
             receive_time = time.time()
@@ -182,17 +201,19 @@ if __name__ == '__main__':
         avg_transfer = sum(transfer_times) / len(transfer_times)
 
         # total learning update on GPU
-        model.update()
+        with profiler as p:
+                model.update()
+                p.step()
         total_learning = time.time() - start_total_learning
         episode_total_learning_times.append(total_learning)
-        
+
         # learning time
         learn = model.learn_time
         episode_learning_times.append(learn)
-
+            
         print(
-            f"Episode {episode_counter}: Copy {copy_time:.6f}s, Sampling {avg_sampling:.6f}s, "
-            f"Transfer {avg_transfer:.6f}s, Total_Learning {total_learning:.6f}s, Learning {learn:.6f}s"
+            f"Episode {episode_counter}: Copy {copy_time:.3f}s, Sampling {avg_sampling:.3f}s, "
+            f"Transfer {avg_transfer:.3f}s, Total_Learning {total_learning:.3f}s, Learning {learn:.3f}s"
         )
 
     # experiment summary
@@ -212,6 +233,7 @@ if __name__ == '__main__':
         f"Learn {final_avg_learning:.6f}s | "
         f"Total {total_time:.6f}min\n"
     )
+    print(f"[Profiler LogDir] → {TENSORFLOW_LOGS}")
 
     pool.close()
     pool.join()

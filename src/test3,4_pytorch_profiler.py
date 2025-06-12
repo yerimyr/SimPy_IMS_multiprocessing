@@ -6,9 +6,25 @@ from torch.utils.tensorboard import SummaryWriter
 from GymWrapper import GymInterface
 from PPO import PPOAgent
 from config_RL import *
+import torch.profiler
 
 main_writer = SummaryWriter(log_dir=TENSORFLOW_LOGS)
-N_MULTIPROCESS = 1
+
+profiler = torch.profiler.profile(
+    schedule=torch.profiler.schedule(
+        wait=1,  
+        warmup=1,  
+        active=2,  
+        repeat=1
+    ),
+    on_trace_ready=torch.profiler.tensorboard_trace_handler(TENSORFLOW_LOGS),
+    record_shapes=True,
+    with_stack=False,
+    profile_memory=True,
+    with_flops=True
+)
+
+N_MULTIPROCESS = 5
 
 def build_model(env):
     """
@@ -45,24 +61,26 @@ def simulation_worker(core_index, model_state_dict):
     agent = build_model(env)
     agent.policy.load_state_dict(model_state_dict)
     
-    # validation) Verify one inference model per core
+    # validation) Verify model device assignment
     #print(f"[Worker {core_index} PID {os.getpid()}] Inference model id: {id(agent.policy)}")
 
-    # validation) Verify inference models are loaded on CPU/GPU
+    # validation) Verify one inference model per core
     #print(f"[Worker {core_index} | PID {os.getpid()}] Inference model.device: {agent.device}")
     #print(f"[Worker {core_index}] first_param.device: {next(agent.policy.parameters()).device}")
     
     start_sampling = time.time()
     state = env.reset()
     
-    # validation) Verify simulator runs on CPU
+    # validation) Verify inference models are loaded on CPU/GPU
     #print(f"[Worker {core_index}] state type: {type(state)}")  # must be list or numpy
     
     done = False
     episode_transitions = []
     episode_reward = 0
     while not done:
-        action, log_prob = agent.select_action(state)  
+        with profiler as p:
+            action, log_prob = agent.select_action(state)
+            p.step()
         
         # validation) Verify where select_action() is executed (inference model location)
         #print(f"[Worker {core_index}] log_prob.device: {log_prob.device}")
@@ -182,7 +200,9 @@ if __name__ == '__main__':
         avg_transfer = sum(transfer_times) / len(transfer_times)
 
         # total learning update on GPU
-        model.update()
+        with profiler as p:
+                model.update()
+                p.step()
         total_learning = time.time() - start_total_learning
         episode_total_learning_times.append(total_learning)
         
@@ -212,6 +232,7 @@ if __name__ == '__main__':
         f"Learn {final_avg_learning:.6f}s | "
         f"Total {total_time:.6f}min\n"
     )
+    print(f"[Profiler LogDir] → {TENSORFLOW_LOGS}")
 
     pool.close()
     pool.join()

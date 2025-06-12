@@ -6,9 +6,25 @@ from torch.utils.tensorboard import SummaryWriter
 from GymWrapper import GymInterface
 from PPO import PPOAgent
 from config_RL import *
+import torch.profiler
 
 main_writer = SummaryWriter(log_dir=TENSORFLOW_LOGS)
-N_MULTIPROCESS = 1
+
+profiler = torch.profiler.profile(
+    schedule=torch.profiler.schedule(
+        wait=1,  
+        warmup=1,  
+        active=2,  
+        repeat=1
+    ),
+    on_trace_ready=torch.profiler.tensorboard_trace_handler(TENSORFLOW_LOGS),
+    record_shapes=True,
+    with_stack=False,
+    profile_memory=True,
+    with_flops=True
+)
+
+N_MULTIPROCESS = 5
 
 def build_model(env):
     """
@@ -43,7 +59,11 @@ def simulation_worker(core_index, model_state_dict):
     """
     env = GymInterface()
     agent = build_model(env)
+    # Load latest parameters from the GPU-trained model
     agent.policy.load_state_dict(model_state_dict)
+    # Move the inference model to CPU
+    agent.policy.to('cpu')  
+    agent.device = torch.device('cpu') 
     
     # validation) Verify one inference model per core
     #print(f"[Worker {core_index} PID {os.getpid()}] Inference model id: {id(agent.policy)}")
@@ -51,7 +71,7 @@ def simulation_worker(core_index, model_state_dict):
     # validation) Verify inference models are loaded on CPU/GPU
     #print(f"[Worker {core_index} | PID {os.getpid()}] Inference model.device: {agent.device}")
     #print(f"[Worker {core_index}] first_param.device: {next(agent.policy.parameters()).device}")
-    
+
     start_sampling = time.time()
     state = env.reset()
     
@@ -62,7 +82,10 @@ def simulation_worker(core_index, model_state_dict):
     episode_transitions = []
     episode_reward = 0
     while not done:
-        action, log_prob = agent.select_action(state)  
+        # Inference now on CPU
+        with profiler as p:
+            action, log_prob = agent.select_action(state)
+            p.step()
         
         # validation) Verify where select_action() is executed (inference model location)
         #print(f"[Worker {core_index}] log_prob.device: {log_prob.device}")
@@ -82,13 +105,13 @@ def process_transitions(transitions):
     """
     states, actions, rewards, next_states, dones, log_probs = [], [], [], [], [], []
     for worker_transitions in transitions:
-        for tr in worker_transitions:
-            states.append(tr[0])
-            actions.append(tr[1])
-            rewards.append(tr[2])
-            next_states.append(tr[3])
-            dones.append(tr[4])
-            log_probs.append(tr[5])
+        for (s, a, r, ns, d, lp) in worker_transitions:
+            states.append(s)
+            actions.append(a)
+            rewards.append(r)
+            next_states.append(ns)
+            dones.append(d)
+            log_probs.append(lp)
     return states, actions, rewards, next_states, dones, log_probs
 
 def worker_wrapper(args):
@@ -97,7 +120,7 @@ def worker_wrapper(args):
 if __name__ == '__main__':
     multiprocessing.set_start_method('spawn')
     pool = multiprocessing.Pool(processes=N_MULTIPROCESS)
-
+    
     total_episodes = N_EPISODES
     episode_counter = 0
 
@@ -118,7 +141,7 @@ if __name__ == '__main__':
         print(f"{LOAD_MODEL_NAME} loaded successfully")
     else:
         model = build_model(env_main)
-
+        
         # validation) Total parameter count
         #total_params = sum(p.numel() for p in model.policy.parameters())
         #print(f"Total parameters: {total_params}")
@@ -126,10 +149,10 @@ if __name__ == '__main__':
         # validation) Trainable parameter count
         #trainable_params = sum(p.numel() for p in model.policy.parameters() if p.requires_grad)
         #print(f"Trainable parameters: {trainable_params}")
-        
+
         # validation) Verify single training model
         #print(f"[Main PID {os.getpid()}] Training model id: {id(model.policy)}")
-        
+
     start_time = time.time()
 
     while episode_counter < total_episodes:
@@ -145,55 +168,51 @@ if __name__ == '__main__':
         sampling_times = []
         transfer_times = []
 
-        # validation) Check integrated buffer
-        #print(f"[Main] Integrated buffer: pool.map start -> {batch_workers} tasks")
-        #start_collect = time.time()
-        
-        # integrated buffer: gather all worker results synchronously
-        results = pool.map(worker_wrapper, tasks)  
-        
-        #collect_time = time.time() - start_collect
-        #print(f"[Main] Integrated buffer: all workers finished ({len(results)} results) collect time {collect_time:.3f}s")
-        
-        all_transitions = []
-        for core_index, sampling, finish_sampling, transitions, episode_reward in results:
+        # independent buffer: process as workers finish
+        for core_index, sampling, finish_sim_time, transitions, episode_reward in pool.imap_unordered(worker_wrapper, tasks):  
+            
+            # validation) Check independent buffer
+            #print(f"[Main] Got result from worker {core_index} at {time.time():.3f}")
+            
             receive_time = time.time()
-            transfer = receive_time - finish_sampling
-
-            episode_sampling_times.append(sampling)
-            episode_transfer_times.append(transfer)
+            transfer = receive_time - finish_sim_time
 
             sampling_times.append(sampling)
             transfer_times.append(transfer)
-            all_transitions.extend(transitions)
+
+            # store transitions
+            start_total_learn = time.time()
+            states, actions, rewards, next_states, dones, log_probs = process_transitions([transitions])
+            for s, a, r, ns, d, lp in zip(states, actions, rewards, next_states, dones, log_probs):
+                model.store_transition((s, a, r, ns, d, lp))
+
+            # total learning update on GPU
+            with profiler as p:
+                model.update()
+                p.step()
+            total_learn = time.time() - start_total_learn
+            episode_total_learning_times.append(total_learn)
+            
+            # learning time
+            learn = model.learn_time
+            episode_learning_times.append(learn)
 
             # tensorboard
             episode_counter += 1
             main_writer.add_scalar(f"reward_core_{core_index+1}", episode_reward, episode_counter)
             main_writer.add_scalar("reward_average", episode_reward, episode_counter)
 
-        # store all transitions at once
-        start_total_learning = time.time()
-        states, actions, rewards, next_states, dones, log_probs = process_transitions([all_transitions])
-        for s, a, r, ns, d, lp in zip(states, actions, rewards, next_states, dones, log_probs):
-            model.store_transition((s, a, r, ns, d, lp))
+            print(
+                f"Worker {core_index} done — episode {episode_counter}: "
+                f"Copy {copy_time:.3f}s, Sampling {sampling:.3f}s, "
+                f"Transfer {transfer:.3f}s, Total Learn {total_learn:.3f}s, Learn {learn:.3f}s"
+            )
 
         avg_sampling = sum(sampling_times) / len(sampling_times)
         avg_transfer = sum(transfer_times) / len(transfer_times)
 
-        # total learning update on GPU
-        model.update()
-        total_learning = time.time() - start_total_learning
-        episode_total_learning_times.append(total_learning)
-        
-        # learning time
-        learn = model.learn_time
-        episode_learning_times.append(learn)
-
-        print(
-            f"Episode {episode_counter}: Copy {copy_time:.6f}s, Sampling {avg_sampling:.6f}s, "
-            f"Transfer {avg_transfer:.6f}s, Total_Learning {total_learning:.6f}s, Learning {learn:.6f}s"
-        )
+        episode_sampling_times.append(avg_sampling)
+        episode_transfer_times.append(avg_transfer)
 
     # experiment summary
     total_time = (time.time() - start_time) / 60
@@ -212,6 +231,8 @@ if __name__ == '__main__':
         f"Learn {final_avg_learning:.6f}s | "
         f"Total {total_time:.6f}min\n"
     )
+    print(f"[Profiler LogDir] → {TENSORFLOW_LOGS}")
+
 
     pool.close()
     pool.join()

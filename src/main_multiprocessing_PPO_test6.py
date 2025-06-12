@@ -25,7 +25,7 @@ def build_model(env):
         update_steps=UPDATE_STEPS
     )
     
-    # validation) 학습용 모델(device) 위치 확인
+    # validation) Verify training model device assignment
     #print(f"[Main] Training model on device: {model.device}")
     
     return model
@@ -45,29 +45,29 @@ def simulation_worker(core_index, model_state_dict):
     agent = build_model(env)
     agent.policy.load_state_dict(model_state_dict)
     # Move the inference model to CPU
-    agent.policy.to('cpu')  ########## 추론용모델(cpu) 구현 부분 ##########
+    agent.policy.to('cpu')  
     agent.device = torch.device('cpu') 
     
-    # validation) 추론용 모델이 코어 개수만큼 있는지 확인
+    # validation) Verify one inference model per core
     #print(f"[Worker {core_index} PID {os.getpid()}] Inference model id: {id(agent.policy)}")
 
-    # validation) 추론용 모델이 CPU/GPU에 남아있는지 확인
+    # validation) Verify inference models are loaded on CPU/GPU
     #print(f"[Worker {core_index} | PID {os.getpid()}] Inference model.device: {agent.device}")
     #print(f"[Worker {core_index}] first_param.device: {next(agent.policy.parameters()).device}")
     
     start_sampling = time.time()
     state = env.reset()
     
-    # validation) 시뮬레이터가 CPU에서 동작하는지 확인
-    #print(f"[Worker {core_index}] state type: {type(state)}")  # list 혹은 numpy.ndarray 여야 함
+    # validation) Verify simulator runs on CPU
+    #print(f"[Worker {core_index}] state type: {type(state)}")  # must be list or numpy
     
     done = False
     episode_transitions = []
     episode_reward = 0
     while not done:
-        action, log_prob = agent.select_action(state)  ########## 추론용모델(gpu) 구현 부분 ##########
+        action, log_prob = agent.select_action(state)  
         
-        # validation) select_action()이 어디에서 돌아가는지 -> 추론용모델의 위치 확인
+        # validation) Verify where select_action() is executed (inference model location)
         #print(f"[Worker {core_index}] log_prob.device: {log_prob.device}")
         
         next_state, reward, done, _ = env.step(action)
@@ -122,15 +122,15 @@ if __name__ == '__main__':
     else:
         model = build_model(env_main)
         
-        # validation) 전체 파라미터 수 (bias 포함)
+        # validation) Total parameter count
         #total_params = sum(p.numel() for p in model.policy.parameters())
         #print(f"Total parameters: {total_params}")
 
-        # validation) 학습 가능한(trainable) 파라미터 수
+        # validation) Trainable parameter count
         #trainable_params = sum(p.numel() for p in model.policy.parameters() if p.requires_grad)
         #print(f"Trainable parameters: {trainable_params}")
 
-        # validation) 학습용 모델이 1개인지 확인
+        # validation) Verify single training model
         #print(f"[Main PID {os.getpid()}] Training model id: {id(model.policy)}")
 
     start_time = time.time()
@@ -148,13 +148,13 @@ if __name__ == '__main__':
         sampling_times = []
         transfer_times = []
 
-        # validation) integrated buffer가 맞는지 확인
-        #print(f"[Main] Integrated buffer: pool.map 시작 -> {batch_workers} tasks")
+        # validation) Check integrated buffer
+        #print(f"[Main] Integrated buffer: pool.map start -> {batch_workers} tasks")
         #start_collect = time.time()
         # integrated buffer: gather all worker results synchronously
-        results = pool.map(worker_wrapper, tasks)  ########## integrated buffer 구현 부분 ##########
+        results = pool.map(worker_wrapper, tasks)  
         #collect_time = time.time() - start_collect
-        #print(f"[Main] Integrated buffer: 모든 워커 완료 ({len(results)} results) 수집 시간 {collect_time:.3f}s")
+        #print(f"[Main] Integrated buffer: all workers finished ({len(results)} results) collect time {collect_time:.3f}s")
 
         all_transitions = []
         for core_index, sampling, finish_sampling, transitions, episode_reward in results:
