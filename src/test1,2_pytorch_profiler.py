@@ -11,10 +11,14 @@ import torch.profiler
 main_writer = SummaryWriter(log_dir=TENSORFLOW_LOGS)
 
 profiler = torch.profiler.profile(
+    activities=[
+        torch.profiler.ProfilerActivity.CPU,
+        torch.profiler.ProfilerActivity.CUDA
+    ],
     schedule=torch.profiler.schedule(
-        wait=1,  
-        warmup=1,  
-        active=2,  
+        wait=0,  
+        warmup=0,  
+        active=1,  
         repeat=1
     ),
     on_trace_ready=torch.profiler.tensorboard_trace_handler(TENSORFLOW_LOGS),
@@ -78,9 +82,7 @@ def simulation_worker(core_index, model_state_dict):
     episode_transitions = []
     episode_reward = 0
     while not done:
-        with profiler as p:
-            action, log_prob = agent.select_action(state)
-            p.step()
+        action, log_prob = agent.select_action(state)
         
         # validation) Verify where select_action() is executed (inference model location)
         #print(f"[Worker {core_index}] log_prob.device: {log_prob.device}")
@@ -182,9 +184,14 @@ if __name__ == '__main__':
                 model.store_transition((s, a, r, ns, d, lp))
 
             # total learning update
-            with profiler as p:
+            if episode_counter == 5:
+                print(next(model.policy.parameters()).device)
+                with profiler as p:
+                    model.update()
+                    torch.cuda.synchronize()
+                    p.step()
+            else:
                 model.update()
-                p.step()
             total_learn = time.time() - start_total_learn
             episode_total_learning_times.append(total_learn)
             
