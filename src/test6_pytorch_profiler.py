@@ -18,7 +18,7 @@ profiler = torch.profiler.profile(
     schedule=torch.profiler.schedule(
         wait=0,  
         warmup=0,  
-        active=1,  
+        active=5,  
         repeat=1
     ),
     on_trace_ready=torch.profiler.tensorboard_trace_handler(TENSORFLOW_LOGS),
