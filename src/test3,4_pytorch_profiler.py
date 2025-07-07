@@ -1,5 +1,6 @@
 import os
 import time
+import csv
 import multiprocessing
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -9,24 +10,6 @@ from config_RL import *
 import torch.profiler
 
 main_writer = SummaryWriter(log_dir=TENSORFLOW_LOGS)
-
-profiler = torch.profiler.profile(
-    activities=[
-        torch.profiler.ProfilerActivity.CPU,
-        torch.profiler.ProfilerActivity.CUDA
-    ],
-    schedule=torch.profiler.schedule(
-        wait=0,  
-        warmup=0,  
-        active=1,  
-        repeat=1
-    ),
-    on_trace_ready=torch.profiler.tensorboard_trace_handler(TENSORFLOW_LOGS),
-    record_shapes=True,
-    with_stack=False,
-    profile_memory=True,
-    with_flops=True
-)
 
 N_MULTIPROCESS = 5
 
@@ -65,24 +48,24 @@ def simulation_worker(core_index, model_state_dict):
     agent = build_model(env)
     agent.policy.load_state_dict(model_state_dict)
     
-    # validation) Verify model device assignment
+    # validation) Verify one inference model per core
     #print(f"[Worker {core_index} PID {os.getpid()}] Inference model id: {id(agent.policy)}")
 
-    # validation) Verify one inference model per core
+    # validation) Verify inference models are loaded on CPU/GPU
     #print(f"[Worker {core_index} | PID {os.getpid()}] Inference model.device: {agent.device}")
     #print(f"[Worker {core_index}] first_param.device: {next(agent.policy.parameters()).device}")
     
-    start_sampling = time.time()
+    start_sim_time = time.time()
     state = env.reset()
     
-    # validation) Verify inference models are loaded on CPU/GPU
+    # validation) Verify simulator runs on CPU
     #print(f"[Worker {core_index}] state type: {type(state)}")  # must be list or numpy
     
     done = False
     episode_transitions = []
     episode_reward = 0
     while not done:
-        action, log_prob = agent.select_action(state)
+        action, log_prob = agent.select_action(state)  
         
         # validation) Verify where select_action() is executed (inference model location)
         #print(f"[Worker {core_index}] log_prob.device: {log_prob.device}")
@@ -91,10 +74,10 @@ def simulation_worker(core_index, model_state_dict):
         episode_transitions.append((state, action, reward, next_state, done, log_prob.item()))
         episode_reward += reward
         state = next_state
-    finish_sampling = time.time()
-    sampling = finish_sampling - start_sampling
+    finish_sim_time = time.time()
+    sim_time = finish_sim_time - start_sim_time
 
-    return core_index, sampling, finish_sampling, episode_transitions, episode_reward
+    return core_index, sim_time, finish_sim_time, episode_transitions, episode_reward
 
 def process_transitions(transitions):
     """
@@ -114,7 +97,7 @@ def process_transitions(transitions):
 def worker_wrapper(args):
     return simulation_worker(*args)
 
-if __name__ == '__main__':
+def run_training():
     multiprocessing.set_start_method('spawn')
     pool = multiprocessing.Pool(processes=N_MULTIPROCESS)
 
@@ -127,8 +110,8 @@ if __name__ == '__main__':
     episode_transfer_times = []
     episode_total_learning_times = []
     episode_learning_times = []
+    episode_waiting_times = []
 
-    # build or load main model on GPU
     env_main = GymInterface()
     if LOAD_MODEL:
         model = build_model(env_main)
@@ -139,107 +122,119 @@ if __name__ == '__main__':
     else:
         model = build_model(env_main)
 
-        # validation) Total parameter count
-        #total_params = sum(p.numel() for p in model.policy.parameters())
-        #print(f"Total parameters: {total_params}")
-
-        # validation) Trainable parameter count
-        #trainable_params = sum(p.numel() for p in model.policy.parameters() if p.requires_grad)
-        #print(f"Trainable parameters: {trainable_params}")
-        
-        # validation) Verify single training model
-        #print(f"[Main PID {os.getpid()}] Training model id: {id(model.policy)}")
-        
     start_time = time.time()
-
     while episode_counter < total_episodes:
         batch_workers = min(N_MULTIPROCESS, total_episodes - episode_counter)
-        # measure parameter copy time
+
         start_copy = time.time()
         model_state_dict = model.policy.state_dict()
         copy_time = time.time() - start_copy
         episode_copy_times.append(copy_time)
 
         tasks = [(i, model_state_dict) for i in range(batch_workers)]
-
         sampling_times = []
         transfer_times = []
+        finish_sampling_times = []
 
-        # validation) Check integrated buffer
-        #print(f"[Main] Integrated buffer: pool.map start -> {batch_workers} tasks")
-        #start_collect = time.time()
-        
-        # integrated buffer: gather all worker results synchronously
-        results = pool.map(worker_wrapper, tasks)  
-        
-        #collect_time = time.time() - start_collect
-        #print(f"[Main] Integrated buffer: all workers finished ({len(results)} results) collect time {collect_time:.3f}s")
-        
+        results = pool.map(worker_wrapper, tasks)
+
         all_transitions = []
         for core_index, sampling, finish_sampling, transitions, episode_reward in results:
             receive_time = time.time()
             transfer = receive_time - finish_sampling
 
-            episode_sampling_times.append(sampling)
-            episode_transfer_times.append(transfer)
-
             sampling_times.append(sampling)
             transfer_times.append(transfer)
+            finish_sampling_times.append(finish_sampling)
             all_transitions.extend(transitions)
 
-            # tensorboard
             episode_counter += 1
             main_writer.add_scalar(f"reward_core_{core_index+1}", episode_reward, episode_counter)
             main_writer.add_scalar("reward_average", episode_reward, episode_counter)
 
-        # store all transitions at once
         start_total_learning = time.time()
         states, actions, rewards, next_states, dones, log_probs = process_transitions([all_transitions])
         for s, a, r, ns, d, lp in zip(states, actions, rewards, next_states, dones, log_probs):
             model.store_transition((s, a, r, ns, d, lp))
 
-        avg_sampling = sum(sampling_times) / len(sampling_times)
-        avg_transfer = sum(transfer_times) / len(transfer_times)
-
-        # total learning update on GPU
-        if episode_counter == 5:
-            print(next(model.policy.parameters()).device)
-            with profiler as p:
-                model.update()
-                torch.cuda.synchronize()
-                p.step()
-        else:
-            model.update()
+        model.update()
         total_learning = time.time() - start_total_learning
         episode_total_learning_times.append(total_learning)
-        
+
         # learning time
         learn = model.learn_time
         episode_learning_times.append(learn)
 
-        print(
-            f"Episode {episode_counter}: Copy {copy_time:.6f}s, Sampling {avg_sampling:.6f}s, "
-            f"Transfer {avg_transfer:.6f}s, Total_Learning {total_learning:.6f}s, Learning {learn:.6f}s"
-        )
+        waiting_times = [max(finish_sampling_times) - x for x in finish_sampling_times]
+        transfer_times = [x - y for x, y in zip(transfer_times, waiting_times)]
+
+        avg_sampling = sum(sampling_times) / len(sampling_times)
+        avg_transfer = sum(transfer_times) / len(transfer_times)
+        avg_waiting = sum(waiting_times) / len(waiting_times)
+
+        episode_sampling_times.append(avg_sampling)
+        episode_transfer_times.append(avg_transfer)
+        episode_waiting_times.append(avg_waiting)
 
     # experiment summary
     total_time = (time.time() - start_time) / 60
-    final_avg_param_copy = sum(episode_copy_times) / len(episode_copy_times)
-    final_avg_sampling = sum(episode_sampling_times) / len(episode_sampling_times)
-    final_avg_transfer = sum(episode_transfer_times) / len(episode_transfer_times)
-    final_avg_total_learning = sum(episode_total_learning_times) / len(episode_total_learning_times)
-    final_avg_learning = sum(episode_learning_times) / len(episode_learning_times)
+    final_avg_param_copy = sum(episode_copy_times)
+    final_avg_sampling = sum(episode_sampling_times)
+    final_avg_transfer = sum(episode_transfer_times)
+    final_avg_total_learning = sum(episode_total_learning_times)
+    final_avg_learning = sum(episode_learning_times)
+    final_avg_waiting = sum(episode_waiting_times)
 
     print(
         f"\n[Experiment Summary] "
         f"Copy {final_avg_param_copy:.6f}s | "
         f"Sampling {final_avg_sampling:.6f}s | "
+        f"Waiting {final_avg_waiting:.6f}s | "
         f"Transfer {final_avg_transfer:.6f}s | "
         f"Total_Learn {final_avg_total_learning:.6f}s | "
         f"Learn {final_avg_learning:.6f}s | "
         f"Total {total_time:.6f}min\n"
     )
-    print(f"[Profiler LogDir] → {TENSORFLOW_LOGS}")
+
+    data = {
+        'Copy': final_avg_param_copy,
+        'Sampling': final_avg_sampling,
+        'Waiting1': final_avg_waiting,
+        'Transfer': final_avg_transfer,
+        'Total_Learn': final_avg_total_learning,
+        'Learn': final_avg_learning,
+        'Total': total_time
+    }
+
+    with open(f"{N_MULTIPROCESS}core_test3_누적.csv", 'w', newline='') as csvfile:
+        fieldnames = ['Copy', 'Sampling', 'Waiting1', 'Transfer', 'Total_Learn', 'Learn', 'Total']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+        writer.writeheader()
+        writer.writerow({key: f'{value:.6f}' for key, value in data.items()})
+
+    print(f"[CSV Saved] → {N_MULTIPROCESS}core_test4_누적.csv")
 
     pool.close()
     pool.join()
+
+# 실행 예시
+if __name__ == '__main__':
+    profiler = torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA
+        ],
+        schedule=torch.profiler.schedule(
+            wait=0,
+            warmup=0,
+            active=100,
+            repeat=1 
+        ),
+        on_trace_ready=torch.profiler.tensorboard_trace_handler(TENSORFLOW_LOGS),
+        record_shapes=True,
+        profile_memory=True,
+        with_stack=False
+    )
+    with profiler as prof:
+        run_training()
