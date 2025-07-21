@@ -8,7 +8,7 @@ from PPO import PPOAgent
 from config_RL import *
 
 main_writer = SummaryWriter(log_dir=TENSORFLOW_LOGS)
-N_MULTIPROCESS = 1
+N_MULTIPROCESS = 5
 
 def build_model(env):
     state_dim = len(env.reset())
@@ -39,26 +39,25 @@ def simulation_worker(core_index, model_state_dict):
         transitions.append((state, action, reward, next_state, done, log_prob.item()))
         total_reward += reward
         state = next_state
-    finish_sampling = time.time()
-    sampling_time = finish_sampling - start_sampling
+    sampling_time = time.time() - start_sampling
 
     for s, a, r, ns, d, lp in transitions:
         agent.store_transition((s, a, r, ns, d, lp))
 
     start_update = time.time()
-    agent.update()
+    gradients = agent.compute_gradients()  
     learn_time = time.time() - start_update
 
-    return core_index, sampling_time, learn_time, total_reward, agent.policy.state_dict()
+    return core_index, sampling_time, learn_time, total_reward, gradients
 
 def worker_wrapper(args):
     return simulation_worker(*args)
 
-def average_state_dicts(state_dicts):
-    avg_state_dict = {}
-    for key in state_dicts[0].keys():
-        avg_state_dict[key] = sum(d[key] for d in state_dicts) / len(state_dicts)
-    return avg_state_dict
+def average_gradients(gradient_dicts):
+    avg_grad = {}
+    for key in gradient_dicts[0].keys():
+        avg_grad[key] = sum(d[key] for d in gradient_dicts) / len(gradient_dicts)
+    return avg_grad
 
 if __name__ == '__main__':
     multiprocessing.set_start_method('spawn')
@@ -89,20 +88,20 @@ if __name__ == '__main__':
 
         results = pool.map(worker_wrapper, tasks)
 
-        updated_dicts = []
-        for core_index, sampling_time, learn_time, reward, updated_state_dict in results:
+        gradients_list = []
+        for core_index, sampling_time, learn_time, reward, gradients in results:
             episode_counter += 1
             total_sampling_time += sampling_time
             total_learning_time += learn_time
-            updated_dicts.append(updated_state_dict)
+            gradients_list.append(gradients)
 
             main_writer.add_scalar(f"reward_core_{core_index+1}", reward, episode_counter)
             main_writer.add_scalar("reward_average", reward, episode_counter)
             print(f"[Worker {core_index}] Episode {episode_counter}: "
                   f"Sampling Time {sampling_time:.6f}s, Learn Time {learn_time:.6f}s, Reward {reward:.2f}")
 
-        new_state_dict = average_state_dicts(updated_dicts)
-        model.policy.load_state_dict(new_state_dict)
+        avg_grad = average_gradients(gradients_list)
+        model.apply_gradients(avg_grad)
 
     total_time = (time.time() - start_time) / 60
     total_sampling_time = total_sampling_time / N_MULTIPROCESS
