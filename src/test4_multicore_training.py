@@ -68,6 +68,7 @@ if __name__ == '__main__':
 
     total_sampling_time = 0.0
     total_learning_time = 0.0
+    total_aggregation_time = 0.0
 
     env_main = GymInterface()
     if LOAD_MODEL:
@@ -100,16 +101,21 @@ if __name__ == '__main__':
             print(f"[Worker {core_index}] Episode {episode_counter}: "
                   f"Sampling Time {sampling_time:.6f}s, Learn Time {learn_time:.6f}s, Reward {reward:.2f}")
 
+        start_agg = time.time()
         avg_grad = average_gradients(gradients_list)
         model.apply_gradients(avg_grad)
+        aggregation_time = time.time() - start_agg
+        total_aggregation_time += aggregation_time
 
     total_time = (time.time() - start_time) / 60
     total_sampling_time = total_sampling_time / N_MULTIPROCESS
     total_learning_time = total_learning_time / N_MULTIPROCESS
+    total_aggregation_time = total_aggregation_time / N_MULTIPROCESS
 
     print(f"\n[Experiment Summary] "
           f"Total Sampling Time: {total_sampling_time:.6f}s | "
           f"Total Learning Time: {total_learning_time:.6f}s | "
+          f"Total Aggregation Time: {total_aggregation_time:.6f}s | "
           f"Total Time: {total_time:.6f}min\n")
 
     pool.close()
