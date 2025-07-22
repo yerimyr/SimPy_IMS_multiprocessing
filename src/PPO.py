@@ -126,10 +126,7 @@ class PPOAgent:
 
     def update(self):
         """
-        Performs PPO update using stored experience.
-
-        This function processes stored transitions, computes advantages,
-        and updates the policy and value networks using PPO loss.
+        Performs PPO update using stored experience with **single full-batch update**.
         """
         if not self.memory:
             print("Memory is empty.")
@@ -152,53 +149,39 @@ class PPOAgent:
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         value_target = rewards + self.gamma * next_values.view(-1).detach()
 
-        batch_size = BATCH_SIZE  
-        dataset_size = len(states)
-        indices = np.arange(dataset_size)
-        np.random.shuffle(indices)
-
         start_time = time.time()
-        for _ in range(self.update_steps):
-            for i in range(0, dataset_size, batch_size):
-                batch_indices = indices[i : i + batch_size]
-                batch_states = states[batch_indices]
-                batch_actions = actions[batch_indices]
-                batch_advantages = advantages[batch_indices]
-                batch_log_probs_old = log_probs_old[batch_indices].detach().clone()
-                batch_value_target = value_target[batch_indices].detach().clone()
 
-                action_probs, values_new = self.policy(batch_states)
-                
-                log_probs_new = []
-                for j, dist in enumerate(action_probs):
-                    categorical_dist = Categorical(dist)
-                    log_probs_new.append(categorical_dist.log_prob(batch_actions[:, j]))
-                log_probs_new = torch.sum(torch.stack(log_probs_new), dim=0)
-                
-                ratio = torch.exp(log_probs_new - batch_log_probs_old)
-                surr1 = ratio * batch_advantages
-                surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * batch_advantages
-                policy_loss = -torch.min(surr1, surr2).mean()
-
-                value_loss = nn.MSELoss()(values_new.view(-1), batch_value_target)
-                
-                entropy = torch.stack([
-                    Categorical(dist).entropy().mean() for dist in action_probs
-                ]).mean()
-                entropy_loss = -entropy
-                
-                loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
-                
-                self.optimizer.zero_grad()
-                loss.backward(retain_graph=True)  
-                nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
-                self.optimizer.step()
-                
-                self.learn_time=time.time()-start_time
+        action_probs, values_new = self.policy(states)
         
+        log_probs_new = []
+        for j, dist in enumerate(action_probs):
+            categorical_dist = Categorical(dist)
+            log_probs_new.append(categorical_dist.log_prob(actions[:, j]))
+        log_probs_new = torch.sum(torch.stack(log_probs_new), dim=0)
+
+        ratio = torch.exp(log_probs_new - log_probs_old)
+        surr1 = ratio * advantages
+        surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * advantages
+        policy_loss = -torch.min(surr1, surr2).mean()
+
+        value_loss = nn.MSELoss()(values_new.view(-1), value_target)
+
+        entropy = torch.stack([
+            Categorical(dist).entropy().mean() for dist in action_probs
+        ]).mean()
+        entropy_loss = -entropy
+
+        loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
+        self.optimizer.step()
+
+        self.learn_time = time.time() - start_time
         self.clip_epsilon = max(0.1, self.clip_epsilon * 0.995)
         self.memory.clear()
-        
+
         return self.learn_time
     
     def _compute_gae(self, rewards, values, gamma, lambda_):
