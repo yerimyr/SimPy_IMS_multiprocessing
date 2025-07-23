@@ -150,35 +150,35 @@ class PPOAgent:
         value_target = rewards + self.gamma * next_values.view(-1).detach()
 
         start_time = time.time()
+        for _ in range(self.update_steps):
+            action_probs, values_new = self.policy(states)
+            
+            log_probs_new = []
+            for j, dist in enumerate(action_probs):
+                categorical_dist = Categorical(dist)
+                log_probs_new.append(categorical_dist.log_prob(actions[:, j]))
+            log_probs_new = torch.sum(torch.stack(log_probs_new), dim=0)
 
-        action_probs, values_new = self.policy(states)
-        
-        log_probs_new = []
-        for j, dist in enumerate(action_probs):
-            categorical_dist = Categorical(dist)
-            log_probs_new.append(categorical_dist.log_prob(actions[:, j]))
-        log_probs_new = torch.sum(torch.stack(log_probs_new), dim=0)
+            ratio = torch.exp(log_probs_new - log_probs_old)
+            surr1 = ratio * advantages
+            surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * advantages
+            policy_loss = -torch.min(surr1, surr2).mean()
 
-        ratio = torch.exp(log_probs_new - log_probs_old)
-        surr1 = ratio * advantages
-        surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * advantages
-        policy_loss = -torch.min(surr1, surr2).mean()
+            value_loss = nn.MSELoss()(values_new.view(-1), value_target)
 
-        value_loss = nn.MSELoss()(values_new.view(-1), value_target)
+            entropy = torch.stack([
+                Categorical(dist).entropy().mean() for dist in action_probs
+            ]).mean()
+            entropy_loss = -entropy
 
-        entropy = torch.stack([
-            Categorical(dist).entropy().mean() for dist in action_probs
-        ]).mean()
-        entropy_loss = -entropy
+            loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
 
-        loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
+            self.optimizer.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
+            self.optimizer.step()
 
-        self.optimizer.zero_grad()
-        loss.backward()
-        nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
-        self.optimizer.step()
-
-        self.learn_time = time.time() - start_time
+            self.learn_time = time.time() - start_time
         self.clip_epsilon = max(0.1, self.clip_epsilon * 0.995)
         self.memory.clear()
 
