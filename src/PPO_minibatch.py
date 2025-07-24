@@ -274,6 +274,7 @@ class PPOAgent:
                 if param.requires_grad:
                     param.grad = avg_gradients[name].clone()
             self.optimizer.step()
+            self.clip_epsilon = max(0.1, self.clip_epsilon * 0.995)
             self.optimizer.zero_grad()
 
     # Parallel Learning functions
