@@ -268,11 +268,12 @@ class PPOAgent:
 
     # Parallel Learning functions
     def apply_gradients(self, avg_gradients):
-        for name, param in self.policy.named_parameters():
-            if param.requires_grad:
-                param.grad = avg_gradients[name].clone()
-        self.optimizer.step()
-        self.optimizer.zero_grad()
+        for _ in range(self.update_steps):
+            for name, param in self.policy.named_parameters():
+                if param.requires_grad:
+                    param.grad = avg_gradients[name].clone()
+            self.optimizer.step()
+            self.optimizer.zero_grad()
 
     # Parallel Learning functions
     def compute_gradients(self):
