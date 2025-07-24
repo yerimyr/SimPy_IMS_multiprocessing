@@ -45,11 +45,11 @@ def simulation_worker(core_index, model_state_dict):
 
     agent.policy.to('cuda')  
     agent.device = torch.device('cuda')
-
+    
+    start_update = time.time()
     for s, a, r, ns, d, lp in transitions:
         agent.store_transition((s, a, r, ns, d, lp))
 
-    start_update = time.time()
     gradients = agent.compute_gradients()  
     learn_time = time.time() - start_update
 

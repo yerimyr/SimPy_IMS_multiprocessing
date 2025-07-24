@@ -40,11 +40,11 @@ def simulation_worker(core_index, model_state_dict):
         total_reward += reward
         state = next_state
     sampling_time = time.time() - start_sampling
-
+    
+    start_update = time.time()
     for s, a, r, ns, d, lp in transitions:
         agent.store_transition((s, a, r, ns, d, lp))
 
-    start_update = time.time()
     gradients = agent.compute_gradients()  
     learn_time = time.time() - start_update
 
