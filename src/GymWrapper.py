@@ -259,7 +259,7 @@ class GymInterface(gym.Env):
         STATE_ACTION_REPORT_REAL.append(
             [Item - INVEN_LEVEL_MAX for Item in state])
         return state
-
+    
     def render(self, mode='human'):
         pass
 

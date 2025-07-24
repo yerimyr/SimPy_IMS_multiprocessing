@@ -121,6 +121,10 @@ def run_training():
         print(f"{LOAD_MODEL_NAME} loaded successfully")
     else:
         model = build_model(env_main)
+        
+        # validation) Total parameter count
+        total_params = sum(p.numel() for p in model.policy.parameters())
+        print(f"Total parameters: {total_params}")
 
     start_time = time.time()
     while episode_counter < total_episodes:

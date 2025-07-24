@@ -14,7 +14,7 @@ ACTION_SPACE = [0, 1, 2, 3, 4, 5]
 
 BUFFER_SIZE = 100000
 BATCH_SIZE = 64  
-LEARNING_RATE = 0.0001
+LEARNING_RATE = 0.01
 GAMMA = 0.99
 CLIP_EPSILON = 0.2
 UPDATE_STEPS = 10  
@@ -42,7 +42,7 @@ for key in P:
 # maximum production
 
 # Episode
-N_EPISODES = 5000  # 3000
+N_EPISODES = 3000   # 3000
 
 
 def DEFINE_FOLDER(folder_name):

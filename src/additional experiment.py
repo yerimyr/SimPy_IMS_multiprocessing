@@ -3,14 +3,14 @@ import matplotlib.ticker as ticker
 import numpy as np
 
 # 실험에 사용된 파라미터 수
-param_counts = [9415, 267527, 1059335]
+param_counts = [12255,278815,1081887,1607199]
 
 # 각 지표별 CPU와 GPU 결과
-total_time_cpu = [6.06918, 7.0305, 9.0288]
-total_time_gpu = [6.97452, 7.22568, 7.35234]
+total_time_cpu = [7.12938,8.18556,9.2268,13.2447]
+total_time_gpu = [9.29196,9.62004,9.55284,9.88698]
 
-learning_time_cpu = [1.371541, 2.198253, 3.97101]
-learning_time_gpu = [1.933152, 2.176274, 2.261499]
+learning_time_cpu = [2.306792,3.138035,4.025099,7.856947]
+learning_time_gpu = [4.289329,4.483525,4.297827,4.595831]
 
 cpu_exec_cpu = [11.30, 17.40, 26.20]
 cpu_exec_gpu = [18.80, 19.70, 19.70]
@@ -23,6 +23,8 @@ plt.figure()
 ax = plt.gca()
 ax.xaxis.set_major_formatter(ticker.ScalarFormatter())
 ax.ticklabel_format(style='plain', axis='x')
+plt.xticks(rotation=25)
+plt.tight_layout() 
 plt.plot(param_counts, total_time_cpu, label='CPU Total Time', marker='o')
 plt.plot(param_counts, total_time_gpu, label='GPU Total Time', marker='o')
 plt.xlabel('Parameter Count')
@@ -37,6 +39,8 @@ plt.figure()
 ax = plt.gca()
 ax.xaxis.set_major_formatter(ticker.ScalarFormatter())
 ax.ticklabel_format(style='plain', axis='x')
+plt.xticks(rotation=25)
+plt.tight_layout() 
 plt.plot(param_counts, learning_time_cpu, label='CPU Learning Time', marker='o')
 plt.plot(param_counts, learning_time_gpu, label='GPU Learning Time', marker='o')
 plt.xlabel('Parameter Count')

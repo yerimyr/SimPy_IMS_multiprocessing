@@ -123,16 +123,9 @@ def  run_training():
     else:
         model = build_model(env_main)
         
-        # validation) 전체 파라미터 수 (bias 포함)
+        # validation) Total parameter count
         #total_params = sum(p.numel() for p in model.policy.parameters())
         #print(f"Total parameters: {total_params}")
-
-        # validation) 학습 가능한(trainable) 파라미터 수
-        #trainable_params = sum(p.numel() for p in model.policy.parameters() if p.requires_grad)
-        #print(f"Trainable parameters: {trainable_params}")
-
-        # validation) 학습용 모델이 1개인지 확인
-        #print(f"[Main PID {os.getpid()}] Training model id: {id(model.policy)}")
 
     start_time = time.time()
 
