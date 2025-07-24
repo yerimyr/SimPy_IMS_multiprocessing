@@ -50,7 +50,7 @@ def simulation_worker(core_index, model_state_dict):
     for s, a, r, ns, d, lp in transitions:
         agent.store_transition((s, a, r, ns, d, lp))
 
-    gradients = agent.compute_gradients()  
+    gradients = agent.compute_gradients_minibatch()  
     learn_time = time.time() - start_update
 
     return core_index, sampling_time, learn_time, total_reward, gradients

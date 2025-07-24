@@ -283,7 +283,63 @@ class PPOAgent:
         return advantages
     
     # Parallel Learning functions
-    def compute_loss(self):
+    def compute_loss_minibatch(self):
+        if not self.memory:
+            raise ValueError("Memory is empty.")
+
+        states, actions, rewards, next_states, dones, log_probs_old = zip(*self.memory)
+        states = torch.tensor(np.array(states), dtype=torch.float32, device=self.device)
+        actions = torch.tensor(np.array(actions), dtype=torch.long, device=self.device)
+        rewards = torch.tensor(np.array(rewards), dtype=torch.float32, device=self.device)
+        next_states = torch.tensor(np.array(next_states), dtype=torch.float32, device=self.device)
+        dones = torch.tensor(np.array(dones), dtype=torch.float32, device=self.device)
+        log_probs_old = torch.tensor(np.array(log_probs_old), dtype=torch.float32, device=self.device)
+
+        _, values = self.policy(states)
+        _, next_values = self.policy(next_states)
+        not_dones = (1 - dones).unsqueeze(1)
+        next_values = (next_values * not_dones).clone()
+
+        advantages = self._compute_gae(rewards, values.detach().squeeze(), self.gamma, self.gae_lambda)
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        value_target = rewards + self.gamma * next_values.view(-1).detach()
+        
+        batch_size = BATCH_SIZE  
+        dataset_size = len(states)
+        indices = np.arange(dataset_size)
+        np.random.shuffle(indices)
+        
+        for _ in range(self.update_steps):
+            for i in range(0, dataset_size, batch_size):
+                batch_indices = indices[i : i + batch_size]
+                batch_states = states[batch_indices]
+                batch_actions = actions[batch_indices]
+                batch_advantages = advantages[batch_indices]
+                batch_log_probs_old = log_probs_old[batch_indices].detach().clone()
+                batch_value_target = value_target[batch_indices].detach().clone()
+                action_probs, values_new = self.policy(states)
+                log_probs_new = []
+                for j, dist in enumerate(action_probs):
+                    categorical_dist = Categorical(dist)
+                    log_probs_new.append(categorical_dist.log_prob(actions[:, j]))
+                log_probs_new = torch.sum(torch.stack(log_probs_new), dim=0)
+
+                ratio = torch.exp(log_probs_new - log_probs_old)
+                surr1 = ratio * advantages
+                surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * advantages
+                policy_loss = -torch.min(surr1, surr2).mean()
+
+                value_loss = nn.MSELoss()(values_new.view(-1), value_target)
+
+                entropy = torch.stack([
+                    Categorical(dist).entropy().mean() for dist in action_probs
+                ]).mean()
+                entropy_loss = -entropy
+
+                loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
+        return loss
+
+    def compute_loss_fullbatch(self):
         if not self.memory:
             raise ValueError("Memory is empty.")
 
@@ -326,7 +382,7 @@ class PPOAgent:
 
             loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
         return loss
-
+    
     # Parallel Learning functions
     def apply_gradients(self, avg_gradients):
         for _ in range(self.update_steps):
@@ -338,9 +394,17 @@ class PPOAgent:
             self.optimizer.zero_grad()
 
     # Parallel Learning functions
-    def compute_gradients(self):
+    def compute_gradients_minibatch(self):
         self.optimizer.zero_grad()
-        loss = self.compute_loss()  
+        loss = self.compute_loss_minibatch()  
+        loss.backward()
+        nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
+        gradients = {name: param.grad.clone() for name, param in self.policy.named_parameters() if param.requires_grad}
+        return gradients
+    
+    def compute_gradients_fullbatch(self):
+        self.optimizer.zero_grad()
+        loss = self.compute_loss_fullbatch()  
         loss.backward()
         nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
         gradients = {name: param.grad.clone() for name, param in self.policy.named_parameters() if param.requires_grad}
