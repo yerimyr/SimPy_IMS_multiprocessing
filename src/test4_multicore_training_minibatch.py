@@ -8,7 +8,7 @@ from PPO import PPOAgent
 from config_RL import *
 
 main_writer = SummaryWriter(log_dir=TENSORFLOW_LOGS)
-N_MULTIPROCESS = 5
+N_MULTIPROCESS = 2
 
 def build_model(env):
     state_dim = len(env.reset())
@@ -110,7 +110,7 @@ if __name__ == '__main__':
     total_time = (time.time() - start_time) / 60
     total_sampling_time = total_sampling_time / N_MULTIPROCESS
     total_learning_time = total_learning_time / N_MULTIPROCESS
-    total_aggregation_time = total_aggregation_time / N_MULTIPROCESS
+    total_aggregation_time = total_aggregation_time 
 
     print(f"\n[Experiment Summary] "
           f"Total Sampling Time: {total_sampling_time:.6f}s | "
