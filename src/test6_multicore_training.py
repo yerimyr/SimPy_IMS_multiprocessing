@@ -8,7 +8,7 @@ from PPO import PPOAgent
 from config_RL import *
 
 main_writer = SummaryWriter(log_dir=TENSORFLOW_LOGS)
-N_MULTIPROCESS = 2
+N_MULTIPROCESS = 5
 
 def build_model(env):
     state_dim = len(env.reset())
@@ -27,6 +27,8 @@ def simulation_worker(core_index, model_state_dict):
     env = GymInterface()
     agent = build_model(env)
     agent.policy.load_state_dict(model_state_dict)
+    agent.policy.to('cpu')  
+    agent.device = torch.device('cpu') 
 
     start_sampling = time.time()
     state = env.reset()
@@ -40,12 +42,15 @@ def simulation_worker(core_index, model_state_dict):
         total_reward += reward
         state = next_state
     sampling_time = time.time() - start_sampling
+
+    agent.policy.to('cuda')  
+    agent.device = torch.device('cuda')
     
     start_update = time.time()
     for s, a, r, ns, d, lp in transitions:
         agent.store_transition((s, a, r, ns, d, lp))
 
-    gradients = agent.compute_gradients_minibatch()  
+    gradients = agent.compute_gradients()  
     learn_time = time.time() - start_update
 
     return core_index, sampling_time, learn_time, total_reward, gradients

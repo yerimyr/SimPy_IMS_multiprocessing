@@ -9,7 +9,8 @@ from PPO import PPOAgent
 from config_RL import *
 
 main_writer = SummaryWriter(log_dir=TENSORFLOW_LOGS)
-N_MULTIPROCESS = 1
+N_MULTIPROCESS = 5
+
 def build_model(env):
     """
     Build a PPO model using environment info.
@@ -40,13 +41,10 @@ def simulation_worker(core_index, model_state_dict):
 
     Returns:
         tuple: (core_index, sim_time, finish_time, transitions, episode_reward)
-    """  
+    """
     env = GymInterface()
     agent = build_model(env)
     agent.policy.load_state_dict(model_state_dict)
-    # Move the inference model to CPU
-    agent.policy.to('cpu')  ########## 추론용모델(cpu) 구현 부분 ##########
-    agent.device = torch.device('cpu') 
     
     # validation) 추론용 모델이 코어 개수만큼 있는지 확인
     #print(f"[Worker {core_index} PID {os.getpid()}] Inference model id: {id(agent.policy)}")
@@ -111,7 +109,6 @@ if __name__ == '__main__':
     episode_total_learning_times = []
     episode_learning_times = []
     episode_waiting_times = []
-
     # build or load main model on GPU
     env_main = GymInterface()
     if LOAD_MODEL:
@@ -122,7 +119,7 @@ if __name__ == '__main__':
         print(f"{LOAD_MODEL_NAME} loaded successfully")
     else:
         model = build_model(env_main)
-        
+
         # validation) 전체 파라미터 수 (bias 포함)
         #total_params = sum(p.numel() for p in model.policy.parameters())
         #print(f"Total parameters: {total_params}")
@@ -130,10 +127,10 @@ if __name__ == '__main__':
         # validation) 학습 가능한(trainable) 파라미터 수
         #trainable_params = sum(p.numel() for p in model.policy.parameters() if p.requires_grad)
         #print(f"Trainable parameters: {trainable_params}")
-
+        
         # validation) 학습용 모델이 1개인지 확인
         #print(f"[Main PID {os.getpid()}] Training model id: {id(model.policy)}")
-
+        
     start_time = time.time()
 
     while episode_counter < total_episodes:
@@ -152,11 +149,13 @@ if __name__ == '__main__':
         # validation) integrated buffer가 맞는지 확인
         #print(f"[Main] Integrated buffer: pool.map 시작 -> {batch_workers} tasks")
         #start_collect = time.time()
+        
         # integrated buffer: gather all worker results synchronously
         results = pool.map(worker_wrapper, tasks)  ########## integrated buffer 구현 부분 ##########
+        
         #collect_time = time.time() - start_collect
         #print(f"[Main] Integrated buffer: 모든 워커 완료 ({len(results)} results) 수집 시간 {collect_time:.3f}s")
-
+        
         all_transitions = []
         for core_index, sampling, finish_sampling, transitions, episode_reward in results:
             receive_time = time.time()
@@ -179,14 +178,14 @@ if __name__ == '__main__':
             model.store_transition((s, a, r, ns, d, lp))
 
         # total learning update on GPU
-        model.update_fullbatch()
+        model.update()
         total_learning = time.time() - start_total_learning
         episode_total_learning_times.append(total_learning)
-
+        
         # learning time
         learn = model.learn_time
         episode_learning_times.append(learn)
-        
+
         waiting_times = [max(finish_sampling_times) - x for x in finish_sampling_times]
         transfer_times = [x - y for x, y in zip(transfer_times, waiting_times)]
         
@@ -200,8 +199,8 @@ if __name__ == '__main__':
         episode_waiting_times.append(avg_waiting)
 
         print(
-            f"Episode {episode_counter}: Copy {copy_time:.3f}s, Sampling {avg_sampling:.3f}s, "
-            f"Transfer {avg_transfer:.3f}s, Total_Learning {total_learning:.3f}s, Learning {learn:.3f}s"
+            f"Episode {episode_counter}: Copy {copy_time:.6f}s, Sampling {avg_sampling:.6f}s, "
+            f"Transfer {avg_transfer:.6f}s, Total_Learning {total_learning:.6f}s, Learning {learn:.6f}s"
         )
 
     # experiment summary
@@ -241,6 +240,6 @@ if __name__ == '__main__':
         
         writer.writeheader()
         writer.writerow({key: f'{value:.6f}' for key, value in data.items()})
-    
+
     pool.close()
     pool.join()

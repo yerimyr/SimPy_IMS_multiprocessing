@@ -8,7 +8,7 @@ from PPO import PPOAgent
 from config_RL import *
 
 main_writer = SummaryWriter(log_dir=TENSORFLOW_LOGS)
-N_MULTIPROCESS = 1
+N_MULTIPROCESS = 2
 
 def build_model(env):
     state_dim = len(env.reset())
@@ -45,7 +45,7 @@ def simulation_worker(core_index, model_state_dict):
     for s, a, r, ns, d, lp in transitions:
         agent.store_transition((s, a, r, ns, d, lp))
 
-    gradients = agent.compute_gradients_fullbatch()  
+    gradients = agent.compute_gradients()  
     learn_time = time.time() - start_update
 
     return core_index, sampling_time, learn_time, total_reward, gradients
@@ -90,7 +90,7 @@ if __name__ == '__main__':
         results = pool.map(worker_wrapper, tasks)
 
         gradients_list = []
-        for core_index, sampling_time, learn_time, reward, gradients in results:       
+        for core_index, sampling_time, learn_time, reward, gradients in results:
             episode_counter += 1
             total_sampling_time += sampling_time
             total_learning_time += learn_time
