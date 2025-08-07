@@ -292,7 +292,7 @@ class PPOAgent:
     # Parallel Learning functions
     def compute_gradients(self):
         self.optimizer.zero_grad()
-        loss = self.compute_loss_minibatch()  
+        loss = self.compute_loss()  
         loss.backward()
         nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
         gradients = {name: param.grad.clone() for name, param in self.policy.named_parameters() if param.requires_grad}
